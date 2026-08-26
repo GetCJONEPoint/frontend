@@ -361,22 +361,22 @@ export default function AgentLane({
         }}
       >
         <span style={{ fontSize: 16.6, fontWeight: 700, whiteSpace: 'nowrap' }}>{title}</span>
-        <span style={{ fontSize: 12.9, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>{subtitle}</span>
+        <span style={{ fontSize: 12.9, color: 'var(--ink-3)', whiteSpace: 'nowrap', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{subtitle}</span>
         <span style={{ flexGrow: 1 }} />
         {model && (
           <span
             className="mono"
             title={model}
             style={{
-              fontSize: 11, color: '#9085e9', background: 'rgba(144,133,233,.14)',
-              padding: '3px 10px', borderRadius: 6, whiteSpace: 'nowrap', fontWeight: 600,
+              fontSize: 16.6, color: '#9085e9', background: 'rgba(144,133,233,.14)',
+              padding: '4px 13px', borderRadius: 8, whiteSpace: 'nowrap', fontWeight: 700, flexShrink: 0,
             }}
           >
             {MODEL_LABEL}
           </span>
         )}
         {verdict && (
-          <span style={{ fontSize: 11.5, color: 'var(--ink-2)', background: 'rgba(255,255,255,.06)', padding: '3px 9px', borderRadius: 6, whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: 16.6, color: 'var(--ink-2)', background: 'rgba(255,255,255,.06)', padding: '4px 13px', borderRadius: 8, whiteSpace: 'nowrap', flexShrink: 0 }}>
             {verdict}
           </span>
         )}
