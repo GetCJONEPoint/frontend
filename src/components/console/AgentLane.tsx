@@ -368,15 +368,15 @@ export default function AgentLane({
             className="mono"
             title={model}
             style={{
-              fontSize: 16.6, color: '#9085e9', background: 'rgba(144,133,233,.14)',
-              padding: '4px 13px', borderRadius: 8, whiteSpace: 'nowrap', fontWeight: 700, flexShrink: 0,
+              fontSize: 12.7, color: '#9085e9', background: 'rgba(144,133,233,.14)',
+              padding: '3.5px 10.5px', borderRadius: 7, whiteSpace: 'nowrap', fontWeight: 700, flexShrink: 0,
             }}
           >
             {MODEL_LABEL}
           </span>
         )}
         {verdict && (
-          <span style={{ fontSize: 16.6, color: 'var(--ink-2)', background: 'rgba(255,255,255,.06)', padding: '4px 13px', borderRadius: 8, whiteSpace: 'nowrap', flexShrink: 0 }}>
+          <span style={{ fontSize: 13.2, color: 'var(--ink-2)', background: 'rgba(255,255,255,.06)', padding: '3.5px 10.5px', borderRadius: 7, whiteSpace: 'nowrap', flexShrink: 0 }}>
             {verdict}
           </span>
         )}
