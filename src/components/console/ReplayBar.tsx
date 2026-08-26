@@ -27,7 +27,7 @@ export default function ReplayBar({ t, duration, playing, speed, events, onToggl
       <button
         onClick={onToggle}
         style={{
-          width: 40, height: 40, borderRadius: 10, background: 'var(--t-cgv)',
+          width: 40, height: 40, borderRadius: 10, background: 'var(--accent)',
           display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
         }}
         aria-label={playing ? '일시정지' : '재생'}
@@ -53,7 +53,7 @@ export default function ReplayBar({ t, duration, playing, speed, events, onToggl
             style={{
               position: 'absolute', left: `${(e.t / duration) * 100}%`,
               width: 3, height: 16, marginLeft: -1, borderRadius: 2,
-              background: e.agent === 'quota' ? 'var(--t-oliveyoung)' : 'var(--t-cgv)',
+              background: e.agent === 'quota' ? 'var(--t-oliveyoung)' : 'var(--accent)',
               transform: 'translateY(-11px)',
             }}
           />
@@ -61,7 +61,7 @@ export default function ReplayBar({ t, duration, playing, speed, events, onToggl
         <input
           type="range" min={0} max={duration} step={100} value={Math.round(t)}
           onChange={(e) => onSeek(Number(e.target.value))}
-          style={{ width: '100%', accentColor: 'var(--t-cgv)' }}
+          style={{ width: '100%', accentColor: 'var(--accent)' }}
         />
       </div>
 
@@ -73,7 +73,7 @@ export default function ReplayBar({ t, duration, playing, speed, events, onToggl
             className="mono"
             style={{
               padding: '5px 10px', borderRadius: 7, fontSize: 12, fontWeight: 600,
-              background: speed === v ? 'var(--t-cgv)' : 'var(--hair)',
+              background: speed === v ? 'var(--accent)' : 'var(--hair)',
               color: speed === v ? '#0d0d0d' : 'var(--ink-2)',
             }}
           >

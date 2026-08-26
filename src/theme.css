@@ -12,10 +12,11 @@
   --good: #0ca30c;
   --warn: #fab219;
   --crit: #d03b3b;
+  --accent: #3987e5;   /* UI 강조 — 테넌트 색과 분리 */
 
   /* 테넌트 색 — dataviz 카테고리 팔레트 고정 순서 (다크 스텝) */
-  --t-cgv: #3987e5;
-  --t-cjenm: #d95926;
+  --t-cgv: #d95926;
+  --t-cjenm: #3987e5;
   --t-oliveyoung: #199e70;
   --t-vips: #c98500;
 
@@ -186,3 +187,80 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .pulse { animation: pulse 1.4s ease-in-out infinite; }
+
+/* ── 파이프라인 단계 ────────────────────────────────
+   --stage-c 는 단계 그룹 색. 진행 중인 칸만 깜빡이고,
+   끝난 칸은 오른쪽에 체크 동그라미가 팝업된다. */
+.stage {
+  position: relative;
+  flex: 0 1 168px;
+  min-width: 92px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-align: center;
+  padding: 7px 24px 7px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  background: transparent;
+  transition: color .2s, border-color .2s, background .2s;
+}
+.stage[data-state='done'] {
+  color: var(--ink);
+  font-weight: 700;
+  border-color: var(--line);   /* 지나온 단계는 기본 회색 테두리 */
+  background: var(--surface);
+}
+.stage[data-state='active'] {
+  color: var(--ink);
+  font-weight: 700;
+  border-color: var(--stage-c);
+  animation: stage-blink 1.5s ease-in-out infinite;
+}
+.stage[data-state='active'][data-fast='true'] { animation-duration: .6s; }
+/* 종료는 도달한 상태 그대로 멈춰 있는다 */
+.stage[data-state='active'][data-still='true'] {
+  animation: none;
+  background: var(--stage-bg);
+}
+
+@keyframes stage-blink {
+  0%, 100% { background: var(--stage-bg); box-shadow: 0 0 0 0 var(--stage-ring); }
+  55%      { background: transparent;     box-shadow: 0 0 0 6px transparent; }
+}
+
+.stage-check {
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #5fc93a;   /* 완료 = 연두 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: check-pop .24s cubic-bezier(.34, 1.56, .64, 1) both;
+}
+@keyframes check-pop {
+  from { transform: translateY(-50%) scale(0); opacity: 0; }
+  to   { transform: translateY(-50%) scale(1); opacity: 1; }
+}
+
+/* 체크는 획을 따라 그려진다 — 왼쪽 아래로 내려갔다가 오른쪽 위로 */
+.stage-check path {
+  stroke-dasharray: 24;
+  stroke-dashoffset: 24;
+  animation: check-draw .62s ease-out .2s forwards;
+}
+@keyframes check-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes popup-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes popup-in {
+  from { opacity: 0; transform: translateY(14px) scale(.96); }
+  to   { opacity: 1; transform: none; }
+}

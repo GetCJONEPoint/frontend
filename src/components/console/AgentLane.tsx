@@ -9,7 +9,8 @@ const EXEC_STYLE: Record<Executor, { bg: string; fg: string }> = {
   exec: { bg: 'rgba(217,89,38,.16)', fg: '#d95926' },
 };
 const PHASE_LABEL: Record<Phase, string> = {
-  monitor: '모니터링', diagnose: '진단', act: '조치', improve: '자기개선',
+  detect: '탐지', triage: '트리아지', preprocess: '전처리', collect: '데이터 수집',
+  diagnose: '진단', act: '조치', cooldown: '쿨다운', done: '종료',
 };
 
 function Badge({ executor }: { executor: Executor }) {
@@ -128,8 +129,8 @@ function Payload({ data }: { data: unknown }) {
         {(d.options as { name: string; verdict: string; note: string }[]).map((o) => {
           const on = o.verdict === '채택';
           return (
-            <div key={o.name} style={{ display: 'flex', alignItems: 'flex-start', gap: 10.8, padding: '9.6px 13.2px', borderRadius: 9.6, background: on ? 'rgba(57,135,229,.12)' : 'var(--surface-2)', border: on ? '1px solid var(--t-cgv)' : '1px solid transparent' }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: on ? 'var(--t-cgv)' : 'var(--ink-3)', width: 31.2, flexShrink: 0, paddingTop: 1.2 }}>{o.verdict}</span>
+            <div key={o.name} style={{ display: 'flex', alignItems: 'flex-start', gap: 10.8, padding: '9.6px 13.2px', borderRadius: 9.6, background: on ? 'rgba(57,135,229,.12)' : 'var(--surface-2)', border: on ? '1px solid var(--accent)' : '1px solid transparent' }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: on ? 'var(--accent)' : 'var(--ink-3)', width: 31.2, flexShrink: 0, paddingTop: 1.2 }}>{o.verdict}</span>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 15, color: on ? 'var(--ink)' : 'var(--ink-3)', fontWeight: on ? 600 : 400 }}>{o.name}</div>
                 <div style={{ fontSize: 13.2, color: 'var(--ink-3)', marginTop: 2.4 }}>{o.note}</div>
@@ -347,7 +348,7 @@ export default function AgentLane({
     <div
       className="card"
       style={{
-        width, flexGrow: width ? undefined : 1, flexShrink: 0,
+        width, flexGrow: width ? undefined : 1, flexShrink: 1,
         display: 'flex', flexDirection: 'column', padding: 0,
         minHeight: 0, minWidth: 0, overflow: 'hidden',
       }}

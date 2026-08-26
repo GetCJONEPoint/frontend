@@ -94,7 +94,7 @@ export default function DemoControl() {
                 <button
                   onClick={() => publish({ type: 'replay', action: 'seek', t: s.seek })}
                   style={{
-                    marginTop: 9, background: 'var(--t-cgv)', color: '#0d0d0d',
+                    marginTop: 9, background: 'var(--accent)', color: '#0d0d0d',
                     borderRadius: 8, padding: '7px 12px', fontSize: 12, fontWeight: 700,
                   }}
                 >

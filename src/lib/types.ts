@@ -35,7 +35,7 @@ export interface Balance {
 
 export type AgentId = 'quota' | 'incident';
 export type Executor = 'llm' | 'code' | 'exec';
-export type Phase = 'monitor' | 'diagnose' | 'act' | 'improve';
+export type Phase = 'detect' | 'triage' | 'preprocess' | 'collect' | 'diagnose' | 'act' | 'cooldown' | 'done';
 
 export interface AgentStep {
   id: string;

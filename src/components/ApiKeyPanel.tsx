@@ -89,7 +89,7 @@ export default function ApiKeyPanel({ onClose }: { onClose: () => void }) {
                 style={{
                   flexGrow: 1, textAlign: 'left', borderRadius: 10, padding: '13px 15px',
                   background: mode === o.v ? 'rgba(57,135,229,.12)' : 'var(--surface-2)',
-                  border: mode === o.v ? '1.5px solid var(--t-cgv)' : '1px solid var(--hair)',
+                  border: mode === o.v ? '1.5px solid var(--accent)' : '1px solid var(--hair)',
                 }}
               >
                 <div style={{ fontSize: 14, fontWeight: 700, color: mode === o.v ? 'var(--ink)' : 'var(--ink-2)' }}>
@@ -175,7 +175,7 @@ export default function ApiKeyPanel({ onClose }: { onClose: () => void }) {
           <button
             onClick={reload}
             disabled={loading}
-            style={{ alignSelf: 'flex-start', background: 'var(--t-cgv)', color: '#0d0d0d', borderRadius: 9, padding: '9px 15px', fontSize: 13, fontWeight: 700 }}
+            style={{ alignSelf: 'flex-start', background: 'var(--accent)', color: '#0d0d0d', borderRadius: 9, padding: '9px 15px', fontSize: 13, fontWeight: 700 }}
           >
             {loading ? '불러오는 중…' : '키 다시 불러오기'}
           </button>

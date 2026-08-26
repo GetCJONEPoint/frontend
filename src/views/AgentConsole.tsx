@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import PipelineBar from '../components/console/PipelineBar';
+import PipelineBar, { AgentSwitch } from '../components/console/PipelineBar';
 import ObservePanel from '../components/console/ObservePanel';
 import AgentLane from '../components/console/AgentLane';
 import ReplayBar from '../components/console/ReplayBar';
+import ComboPopup from '../components/console/ComboPopup';
 import { RATE_PER_M, loadRun } from '../lib/mockRun';
+import { TENANTS } from '../lib/tenants';
 import { useReplay } from '../lib/useReplay';
 import { useBus } from '../lib/bus';
 import type { AgentId, PosCall, RunTimeline } from '../lib/types';
@@ -14,8 +16,8 @@ export default function AgentConsole() {
   const [run, setRun] = useState<RunTimeline | null>(null);
   const [posCalls, setPosCalls] = useState<PosCall[]>([]);
   const [loadBanner, setLoadBanner] = useState<string | null>(null);
-  const [showCaveats, setShowCaveats] = useState(false);
-  const [focus, setFocus] = useState<AgentId | 'both'>('quota');
+  const [focus, setFocus] = useState<AgentId>('quota');
+  const [comboClosed, setComboClosed] = useState(false);
 
   const { t, playing, speed, setSpeed, toggle, seek, play } = useReplay(run?.durationMs ?? FALLBACK_DURATION);
 
@@ -25,6 +27,9 @@ export default function AgentConsole() {
     loadRun().then((r) => { if (alive) setRun(r); });
     return () => { alive = false; };
   }, []);
+
+  const comboReached = !!run && run.steps.some((s) => s.id === 'q-combo' && s.t <= t);
+  useEffect(() => { if (!comboReached) setComboClosed(false); }, [comboReached]);
 
   useBus((msg) => {
     if (msg.type === 'pos-call') setPosCalls((prev) => [msg.call, ...prev].slice(0, 8));
@@ -57,6 +62,14 @@ export default function AgentConsole() {
   };
 
   const quotaSteps = visible.filter((s) => s.agent === 'quota');
+
+  // 조합 선택이 끝나면 어떤 도너에서 얼마를 가져왔는지 관측 패널에도 띄운다
+  const comboStep = quotaSteps.find((s) => s.id === 'q-combo');
+  const chosen = (comboStep?.payload as { combos?: { label: string; total: number; chosen: boolean; reason: string }[] } | undefined)
+    ?.combos?.find((c) => c.chosen);
+  const chosenCombo = chosen?.label;
+  const donorKeys = (comboStep?.payload as { donorKeys?: string[] } | undefined)?.donorKeys ?? [];
+  const rebalanceNote = chosenCombo ? `${chosenCombo} → ${TENANTS[run.projection.tenant].label} 할당` : undefined;
   const incidentSteps = visible.filter((s) => s.agent === 'incident');
 
   return (
@@ -66,46 +79,26 @@ export default function AgentConsole() {
         <span style={{ fontSize: 15, fontWeight: 700 }}>AIOps 에이전트 실행 콘솔</span>
         <span style={{ flexGrow: 1 }} />
         {loadBanner && <span className="chip chip-crit pulse">{loadBanner}</span>}
-        <button
-          onClick={() => setShowCaveats((v) => !v)}
-          className="chip chip-warn"
-          style={{ cursor: 'pointer' }}
-          title="이 화면에서 아직 구현되지 않은 것"
-        >
-          미구현 {run.caveats.length}건
-        </button>
-        <span style={{ fontSize: 11, color: 'var(--ink-3)' }}>레인 클릭 → 단독 보기</span>
-        <span className="chip chip-good">리플레이 · 실시간 아님</span>
-        <span className="mono" style={{ fontSize: 11.5, color: 'var(--ink-3)' }}>run_id={run.runId}</span>
+        <AgentSwitch value={focus} onChange={setFocus} />
       </div>
 
-      {showCaveats && (
-        <div style={{ flexShrink: 0, background: 'rgba(250,178,25,.08)', borderBottom: '1px solid rgba(250,178,25,.3)', padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {run.caveats.map((c) => (
-            <div key={c} style={{ fontSize: 12, color: 'var(--ink-2)' }}>· {c}</div>
-          ))}
-          <div style={{ fontSize: 11, color: 'var(--ink-3)', marginTop: 2 }}>
-            숨기지 않고 먼저 밝히는 편이 낫습니다. 질문받고 인정하는 것보다.
-          </div>
-        </div>
-      )}
-
-      <PipelineBar t={t} steps={visible} selected={focus} onSelect={setFocus} />
+      <PipelineBar t={t} steps={visible} selected={focus} />
 
       <div style={{ flexGrow: 1, display: 'flex', gap: 16, padding: '16px 20px', minHeight: 0 }}>
         <ObservePanel
           samples={run.samples}
           idx={idx}
           sloMs={run.sloMs}
-          projection={run.projection}
           posCalls={posCalls}
           tenantTotal={run.tenantTotal}
           usage={usage}
+          rebalanceNote={rebalanceNote}
+          donors={donorKeys}
         />
         <div style={{ flex: '6 1 0', minWidth: 0, display: 'flex', gap: 14, minHeight: 0 }}>
-        {focus !== 'incident' && (
+        {focus === 'quota' && (
           <AgentLane
-            title="Agent 1 — 쿼터 재분배"
+            title="Agent 1 — 트래픽 기반 동적 자원 효율화"
             subtitle="예방적 · 트리거 쿼터 80%"
             steps={quotaSteps}
             verdict={
@@ -116,9 +109,9 @@ export default function AgentConsole() {
             empty="쿼터 80% 트리거를 기다리는 중입니다."
           />
         )}
-        {focus !== 'quota' && (
+        {focus === 'incident' && (
           <AgentLane
-            title="Agent 2 — 장애 대응"
+            title="Agent 2 — 이상 탐지 및 대응"
             subtitle="사후적 · 트리거 이상탐지 알람"
             steps={incidentSteps}
             verdict={
@@ -131,6 +124,18 @@ export default function AgentConsole() {
         )}
         </div>
       </div>
+
+      {comboReached && !comboClosed && chosen && (
+        <ComboPopup
+          label={chosen.label}
+          reason={chosen.reason}
+          total={chosen.total}
+          toTenant={run.projection.tenant}
+          quotaFrom={run.projection.quota}
+          quotaTo={run.projection.quota + run.projection.needRps}
+          onClose={() => setComboClosed(true)}
+        />
+      )}
 
       <ReplayBar
         t={t}

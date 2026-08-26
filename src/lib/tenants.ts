@@ -4,6 +4,7 @@ export interface TenantMeta {
   key: TenantKey;
   /** 백엔드가 x-tenant-id 로 받는 값 (k6 스크립트와 동일) */
   tenantId: string;
+  /** 콘솔에 뜨는 브랜드 표시명. key/tenantId 는 백엔드 계약이라 건드리지 않는다 */
   label: string;
   storeName: string;
   posId: string;
@@ -29,7 +30,7 @@ export const TENANTS: Record<TenantKey, TenantMeta> = {
   cgv: {
     key: 'cgv',
     tenantId: 'cgv',
-    label: 'CGV',
+    label: 'CJ ONSTYLE',
     storeName: 'CGV 송도타임스페이스점',
     posId: 'POS-CGV-0317',
     memberId: 'm-1001',
@@ -53,7 +54,7 @@ export const TENANTS: Record<TenantKey, TenantMeta> = {
   cjenm: {
     key: 'cjenm',
     tenantId: 'cjenm',
-    label: 'CJ ENM',
+    label: '뚜레쥬르',
     storeName: 'CJ ENM 커머스',
     posId: 'POS-ENM-0042',
     memberId: 'm-2001',
@@ -75,7 +76,7 @@ export const TENANTS: Record<TenantKey, TenantMeta> = {
   oliveyoung: {
     key: 'oliveyoung',
     tenantId: 'oliveyoung',
-    label: '올리브영',
+    label: 'CJ 대한통운',
     storeName: '올리브영 명동타운점',
     posId: 'POS-OY-1128',
     memberId: 'm-4001',
