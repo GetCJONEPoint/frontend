@@ -14,7 +14,14 @@
 
 ```bash
 npm install
-npm run dev                    # http://localhost:5173
+npm run dev
+
+# 에이전트 콘솔(메인)
+http://localhost:5173/?view=console
+# CGV POS
+http://localhost:5173/?view=pos&tenant=cgv
+# OLIVEYOUNG POS
+http://localhost:5173/?view=pos&tenant=oliveyoung              
 ```
 
 `.env.local` 은 **안 만들어도 됩니다.** 아래 "API 키" 참고.
