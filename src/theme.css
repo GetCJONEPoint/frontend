@@ -1,0 +1,188 @@
+:root {
+  --bg: #0d0d0d;
+  --surface: #1a1a19;
+  --surface-2: #131313;
+  --line: rgba(255, 255, 255, 0.1);
+  --hair: #2c2c2a;
+  --rule: #383835;
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --ink-3: #898781;
+
+  --good: #0ca30c;
+  --warn: #fab219;
+  --crit: #d03b3b;
+
+  /* 테넌트 색 — dataviz 카테고리 팔레트 고정 순서 (다크 스텝) */
+  --t-cgv: #3987e5;
+  --t-cjenm: #d95926;
+  --t-oliveyoung: #199e70;
+  --t-vips: #c98500;
+
+  --sans: 'IBM Plex Sans KR', system-ui, -apple-system, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+button {
+  padding: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+button:disabled { cursor: not-allowed; opacity: 0.45; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.chip-good { background: rgba(12, 163, 12, 0.14); color: var(--good); }
+.chip-warn { background: rgba(250, 178, 25, 0.14); color: var(--warn); }
+.chip-crit { background: rgba(208, 59, 59, 0.16); color: var(--crit); }
+
+.bar-track { background: var(--hair); border-radius: 3px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+
+/* ── POS 단말은 밝은 면 ───────────────────────────── */
+.pos {
+  --pos-bg: #f4f3f0;
+  --pos-surface: #ffffff;
+  --pos-fill: #f0efec;
+  --pos-fill-2: #e6e4df;
+  --pos-ink: #0b0b0b;
+  --pos-ink-2: #52514e;
+  --pos-ink-3: #898781;
+  --pos-line: rgba(11, 11, 11, 0.09);
+  background: var(--pos-bg);
+  color: var(--pos-ink);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pos-card {
+  background: var(--pos-surface);
+  border: 1px solid var(--pos-line);
+  border-radius: 14px;
+}
+.key {
+  height: 62px;
+  border-radius: 10px;
+  background: var(--pos-fill);
+  color: var(--pos-ink);
+  font-family: var(--mono);
+  font-size: 24px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s;
+}
+.key:active { background: var(--pos-fill-2); }
+.key-alt { background: var(--pos-fill-2); font-family: var(--sans); font-size: 14px; font-weight: 600; color: var(--pos-ink-2); }
+
+.big-btn {
+  height: 66px;
+  border-radius: 12px;
+  font-size: 19px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: filter 0.12s;
+}
+.big-btn:active:not(:disabled) { filter: brightness(0.9); }
+
+.pos { --pos-point: #4a3aa7; }
+
+.menu-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 16px 14px;
+  border-radius: 13px;
+  background: var(--pos-surface);
+  border: 1.5px solid var(--pos-line);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.13s, background 0.13s, transform 0.08s, box-shadow 0.13s;
+}
+.menu-tile:hover {
+  border-color: #16171a;
+  box-shadow: 0 3px 12px rgba(11, 11, 11, 0.08);
+}
+.menu-tile:active { transform: scale(0.985); }
+.menu-tile[data-active='true'] {
+  border-color: var(--tile-accent, #16171a);
+}
+
+.tile-x {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 27px;
+  height: 27px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--pos-ink-3);
+  transition: background 0.12s, color 0.12s;
+}
+.tile-x:hover {
+  /* 타일 선택색(테넌트 브랜드 색)과 같은 색 */
+  background: var(--tile-accent, #16171a);
+  color: #ffffff;
+}
+
+.step-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: var(--pos-fill);
+  color: var(--pos-ink);
+  font-size: 20px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s;
+}
+.step-btn:hover { background: var(--pos-fill-2); }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.pulse { animation: pulse 1.4s ease-in-out infinite; }
