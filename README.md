@@ -18,8 +18,10 @@ npm run dev
 
 # 에이전트 콘솔(메인)
 http://localhost:5173/?view=console
+
 # CGV POS
 http://localhost:5173/?view=pos&tenant=cgv
+
 # OLIVEYOUNG POS
 http://localhost:5173/?view=pos&tenant=oliveyoung              
 ```
