@@ -290,21 +290,21 @@ function CollectProgressCard({ t }: { t: number }) {
               <span
                 className="mono"
                 style={{
-                  width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                  width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
                   background: checked ? '#8bc34a' : 'var(--ink-3)', color: checked ? '#ffffff' : '#0b0b0d',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13.5, fontWeight: 800,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12.5, fontWeight: 800,
                   transition: 'background .3s ease',
                 }}
               >
                 {checked ? (
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="3.8" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="3.8" strokeLinecap="round" strokeLinejoin="round">
                     <path d="m5 12.5 4.5 4.5L19 7" />
                   </svg>
                 ) : (i + 1)}
               </span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                <span style={{ fontSize: 16, fontWeight: 700, color: checked ? '#ffffff' : 'var(--ink-3)', transition: 'color .3s ease' }}>{s.k}</span>
-                <span className="mono" style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.45, overflowWrap: 'break-word' }}>{s.v}</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 15, fontWeight: 700, lineHeight: 1.25, color: checked ? '#ffffff' : 'var(--ink-3)', transition: 'color .3s ease' }}>{s.k}</span>
+                <span className="mono" style={{ fontSize: 12.2, color: 'var(--ink-2)', lineHeight: 1.35, overflowWrap: 'break-word' }}>{s.v}</span>
               </div>
             </div>
           );
@@ -353,8 +353,9 @@ function DetectMiniChart({ shown, breachAt, staticAt }: { shown: DetectPoint[]; 
   const bp = breachAt >= 0 ? shown[breachAt] : null;
   const sp = staticAt >= 0 ? shown[staticAt] : null;
 
+  // minHeight 를 안 주면 카드가 좁을 때 플롯이 50px 대로 눌려 밴드와 곡선이 겹쳐 읽힌다
   return (
-    <div style={{ position: 'relative', flexGrow: 1, minHeight: 0, paddingRight: 42 }}>
+    <div style={{ position: 'relative', flexGrow: 1, minHeight: 104, paddingRight: 42 }}>
       <div style={{ position: 'relative', width: '100%', height: '100%' }}>
         <svg viewBox={`0 0 ${D_W} ${D_H}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }} role="img" aria-label="동적 베이스라인 대비 CJ 온스타일 적립 P99 추이">
           {D_TICKS.map((v) => (
@@ -385,26 +386,13 @@ function DetectMiniChart({ shown, breachAt, staticAt }: { shown: DetectPoint[]; 
         {/* 표식은 HTML 로 얹는다 — SVG 가 가로로 늘어나 원이 타원이 되는 걸 피한다 */}
         {bp && <Dot x={dXPct(bp.t)} y={dYPct(bp.p99)} color="#d03b3b" />}
         {sp && <Dot x={dXPct(sp.t)} y={dYPct(sp.p99)} color="var(--warn)" />}
+        {/* 이탈 지점의 왼쪽 위 — 오른쪽에 두면 빨간 이탈 면적에 글자가 묻힌다 */}
         {bp && (
-          <span className="mono" style={{ position: 'absolute', left: `${dXPct(bp.t)}%`, top: `${dYPct(bp.p99)}%`, transform: 'translate(9px, -155%)', fontSize: 11.4, fontWeight: 700, color: '#d03b3b', whiteSpace: 'nowrap' }}>
+          <span className="mono" style={{ position: 'absolute', left: `${dXPct(bp.t)}%`, top: `${dYPct(bp.p99)}%`, transform: 'translate(calc(-100% - 7px), -150%)', fontSize: 11.4, fontWeight: 700, color: '#d03b3b', whiteSpace: 'nowrap' }}>
             이탈 t+{(bp.t / 1000).toFixed(1)}s
           </span>
         )}
 
-        {shown.length > 0 && shown[shown.length - 1].p99 > shown[shown.length - 1].cw && (
-          <div
-            style={{
-              position: 'absolute', top: 2, left: '50%', transform: 'translateX(-50%)',
-              display: 'inline-flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap',
-              background: 'rgba(208,59,59,.20)', border: '1.5px solid #d03b3b', borderRadius: 8, padding: '6px 12px',
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d03b3b" strokeWidth="2.6" strokeLinecap="round" style={{ flexShrink: 0 }}>
-              <path d="M12 8v5" /><path d="M12 16.5v.5" /><circle cx="12" cy="12" r="9" />
-            </svg>
-            <span style={{ fontSize: 13.4, fontWeight: 800, color: '#d03b3b' }}>동적 베이스라인을 벗어남!</span>
-          </div>
-        )}
       </div>
 
       {/* 오른쪽 여백에 눈금값 — 그래프 위로 겹치지 않는다 */}
@@ -438,31 +426,47 @@ function DetectAnomalyCard({ t }: { t: number }) {
   const foot = breachAt < 0
     ? '실측 P99 가 동적 임계 아래 — 정상 범위'
     : staticAt < 0
-      ? `동적 베이스라인 t+${(shown[breachAt].t / 1000).toFixed(1)}s 이탈 · 정적 임계값(500ms)은 아직 미도달`
-      : `동적 t+${(shown[breachAt].t / 1000).toFixed(1)}s · 정적 t+${(shown[staticAt].t / 1000).toFixed(1)}s — ${((shown[staticAt].t - shown[breachAt].t) / 1000).toFixed(1)}초 먼저 잡았다`;
+      ? `동적 베이스라인을 벗어남! t+${(shown[breachAt].t / 1000).toFixed(1)}s · 정적 임계값은 아직 미도달`
+      : `동적 베이스라인을 벗어남! — 정적보다 ${((shown[staticAt].t - shown[breachAt].t) / 1000).toFixed(1)}초 먼저`;
 
   return (
     <div className={breached ? 'card card-alert' : 'card'} style={card({ flexGrow: 1, flexShrink: 1, minHeight: 92, justifyContent: 'flex-start', gap: 8 })}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 9.2, flexShrink: 0, flexWrap: 'wrap' }}>
+        {/* 부제(포인트 적립 P99 · CJ 온스타일)는 바로 위 핵심 지표 카드에 이미 있어 뺐다 — 한 줄에 안 들어가면 플롯을 그만큼 깎는다 */}
         <span style={{ fontSize: 15.7, fontWeight: 600 }}>이상 탐지 — 동적 베이스라인</span>
-        <span style={{ fontSize: 12.6, color: 'var(--ink-3)' }}>포인트 적립 P99 · CJ 온스타일</span>
         <span style={{ flexGrow: 1 }} />
         {breached && (
-          <span className="mono" style={{ fontSize: 12.6, fontWeight: 700, color: '#d03b3b' }}>베이스라인 ×{ratio.toFixed(1)}</span>
+          <span className="mono" style={{ fontSize: 12.6, fontWeight: 700, color: '#d03b3b' }}>×{ratio.toFixed(1)}</span>
         )}
-        <span className="mono" style={{ fontSize: 27, fontWeight: 800, color: breached ? '#d03b3b' : 'var(--ink)' }}>{last.p99.toLocaleString('ko-KR')}ms</span>
+        <span className="mono" style={{ fontSize: 23, fontWeight: 800, color: breached ? '#d03b3b' : 'var(--ink)' }}>{last.p99.toLocaleString('ko-KR')}ms</span>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap', flexShrink: 0 }}>
-        <LegendKey label="적립 P99 실측" swatch={<span style={{ width: 13, height: 3, borderRadius: 2, background: '#d03b3b' }} />} />
-        <LegendKey label="동적 임계 AMP·CloudWatch (최근 30분 학습)" swatch={<span style={{ width: 13, height: 7, borderRadius: 2, background: 'rgba(144,133,233,.45)', border: '1px solid #9085e9' }} />} />
-        <LegendKey label="정적 임계값 500ms" swatch={<span style={{ width: 13, height: 0, borderTop: '2px dashed var(--warn)' }} />} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11, flexWrap: 'wrap', flexShrink: 0 }}>
+        <LegendKey label="실측 P99" swatch={<span style={{ width: 13, height: 3, borderRadius: 2, background: '#d03b3b' }} />} />
+        <LegendKey label="동적 임계 (30분 학습)" swatch={<span style={{ width: 13, height: 7, borderRadius: 2, background: 'rgba(144,133,233,.45)', border: '1px solid #9085e9' }} />} />
+        <LegendKey label="정적 500ms" swatch={<span style={{ width: 13, height: 0, borderTop: '2px dashed var(--warn)' }} />} />
       </div>
 
       <DetectMiniChart shown={shown} breachAt={breachAt} staticAt={staticAt} />
 
-      <div style={{ flexShrink: 0, fontSize: 12.2, color: breachAt >= 0 ? 'var(--ink-2)' : 'var(--ink-3)', borderTop: '1px solid var(--hair)', paddingTop: 7 }}>
-        {foot}
+      {/* 경고와 판정 요약을 한 줄에 합쳤다 — 카드가 좁아 각각 한 행씩 쓰면 플롯이 50px 대로 눌린다.
+          그래프 위에 띄우는 것도 안 된다. 곡선·이탈 라벨과 바로 겹친다. */}
+      <div
+        style={{
+          flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+          textAlign: 'center', borderRadius: 8, padding: breached ? '4px 10px' : '3px 0',
+          background: breached ? 'rgba(208,59,59,.20)' : undefined,
+          border: breached ? '1.5px solid #d03b3b' : undefined,
+        }}
+      >
+        {breached && (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d03b3b" strokeWidth="2.6" strokeLinecap="round" style={{ flexShrink: 0 }}>
+            <path d="M12 8v5" /><path d="M12 16.5v.5" /><circle cx="12" cy="12" r="9" />
+          </svg>
+        )}
+        <span style={{ fontSize: 12.4, fontWeight: breached ? 800 : 400, color: breached ? '#d03b3b' : 'var(--ink-3)', lineHeight: 1.4 }}>
+          {foot}
+        </span>
       </div>
     </div>
   );
