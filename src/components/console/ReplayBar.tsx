@@ -66,7 +66,7 @@ export default function ReplayBar({ t, duration, playing, speed, events, onToggl
       </div>
 
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-        {[0.5, 1, 2, 4].map((v) => (
+        {[0.5, 1, 2, 3, 4].map((v) => (
           <button
             key={v}
             onClick={() => onSpeed(v)}
