@@ -690,7 +690,7 @@ const INCIDENT_STEPS: AgentStep[] = [
     },
   },
   /* 예상 결과 도달? 게이트 — 미도달이면 30초 뒤 다시 잰다. 도달할 때까지 반복하는 이 루프가
-     화면에 없으면 "한 번 보고 끝났다"로 보인다. 회차는 600초/30초 = 최대 20회 중 발췌다. */
+     화면에 없으면 "한 번 보고 끝났다"로 보인다. 회차는 30초마다 1·2·3 으로 연달아 오른다 — 건너뛰면 '중간을 왜 안 보여주나' 로 읽힌다. */
   {
     id: 'i-mon-1', t: 65_000, agent: 'incident', phase: 'cooldown',
     state: 'monitor · checks 평가', executor: 'code',
@@ -708,9 +708,9 @@ const INCIDENT_STEPS: AgentStep[] = [
     state: 'monitor · checks 평가', executor: 'code',
     title: '결과 도달 확인',
     payload: {
-      counter: 3, total: 20, heading: '결과 도달 확인',
+      counter: 2, total: 20, heading: '결과 도달 확인',
       lines: [
-        '+90s    대기 커넥션 74건  ·  적립 P99 1,510ms  ·  풀 사용률 81%',
+        '+60s    대기 커넥션 74건  ·  적립 P99 1,510ms  ·  풀 사용률 81%',
         '판정    예상 결과 미도달 → 30초 후 재확인',
       ],
     },
@@ -720,9 +720,9 @@ const INCIDENT_STEPS: AgentStep[] = [
     state: 'monitor · checks 평가', executor: 'code',
     title: '결과 도달 확인',
     payload: {
-      counter: 7, total: 20, heading: '결과 도달 확인',
+      counter: 3, total: 20, heading: '결과 도달 확인',
       lines: [
-        '+210s   대기 커넥션 38건  ·  적립 P99 1,090ms  ·  풀 사용률 67%',
+        '+90s    대기 커넥션 38건  ·  적립 P99 1,090ms  ·  풀 사용률 67%',
         '판정    M1 도달 · M2 미도달 → 30초 후 재확인',
       ],
     },
@@ -733,8 +733,8 @@ const INCIDENT_STEPS: AgentStep[] = [
     title: '마일스톤 순서대로 확인',
     payload: {
       checks: [
-        { n: 'M1', label: '4분 내 대기 커넥션 50건 이하', ok: true, note: '+210s · 38건' },
-        // 30초 간격 평가라 마일스톤 도달 시각도 30초 격자 위에 떨어진다 (9회차)
+        { n: 'M1', label: '4분 내 대기 커넥션 50건 이하', ok: true, note: '+90s · 38건' },
+        // 30초 간격 평가라 마일스톤 도달 시각도 30초 격자 위에 떨어진다 (M1 3회차 · M2 9회차)
         { n: 'M2', label: '7분 내 P99 SLO(1.0s) 이내', ok: true, note: '+270s · 620ms' },
         { n: '결과', label: '예상 결과 도달 — P99 1.0s 이내 · 풀 62% 이하', ok: true },
       ],

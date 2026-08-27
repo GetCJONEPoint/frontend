@@ -443,7 +443,7 @@ function DetectAnomalyCard({ t }: { t: number }) {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 11, flexWrap: 'wrap', flexShrink: 0 }}>
         <LegendKey label="실측 P99" swatch={<span style={{ width: 13, height: 3, borderRadius: 2, background: '#d03b3b' }} />} />
-        <LegendKey label="동적 임계 (30분 학습)" swatch={<span style={{ width: 13, height: 7, borderRadius: 2, background: 'rgba(144,133,233,.45)', border: '1px solid #9085e9' }} />} />
+        <LegendKey label="동적 임계 AMP·CloudWatch (30분 학습)" swatch={<span style={{ width: 13, height: 7, borderRadius: 2, background: 'rgba(144,133,233,.45)', border: '1px solid #9085e9' }} />} />
         <LegendKey label="정적 500ms" swatch={<span style={{ width: 13, height: 0, borderTop: '2px dashed var(--warn)' }} />} />
       </div>
 
@@ -566,7 +566,8 @@ export default function Slot({ agent, phase, t, sample, samples, idx, sloMs, pro
   if (phase === 'detect') return <DetectAnomalyCard t={t} />;
   if (phase === 'collect') return <CollectProgressCard t={t} />;
   if (phase === 'diagnose') return <P99Card samples={samples} idx={idx} sloMs={sloMs} tenants={TENANT_ORDER.filter((k) => k !== 'oliveyoung')} />;
-  if (phase === 'act') return <P99Card samples={samples} idx={idx} sloMs={sloMs} tenants={TENANT_ORDER.filter((k) => k !== 'oliveyoung')} alertOnBreach={false} />;
+  // 조치 중에도 SLO 초과는 초과다 — 다른 단계와 같이 깜빡인다
+  if (phase === 'act') return <P99Card samples={samples} idx={idx} sloMs={sloMs} tenants={TENANT_ORDER.filter((k) => k !== 'oliveyoung')} />;
   // 마일스톤 확인은 오른쪽 로그(i-watch)에 이미 있으므로 왼쪽은 그래프가 칸 전체를 크게 채운다
   if (phase === 'cooldown') return <P99Card samples={samples} idx={idx} sloMs={sloMs} showGoalMark tenants={TENANT_ORDER.filter((k) => k !== 'oliveyoung')} />;
   return <SummaryCard agent={agent} usage={usage} durationMs={durationMs} />;
