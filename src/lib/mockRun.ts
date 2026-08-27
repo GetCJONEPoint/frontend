@@ -245,6 +245,50 @@ function buildIncidentSamples(duration: number): TenantSample[] {
   return out;
 }
 
+/* ── Agent 2 탐지 · 동적 베이스라인 계열 ──────────────
+   run 샘플(0초부터, 1초 간격)만으로는 탐지 화면에서 두 가지를 못 보여준다.
+   ① "동적" 베이스라인이 시간에 따라 다시 계산되며 움직인다는 것 — 보여줄 과거 구간이 없다.
+   ② 8초짜리 이탈 — 80초 축에 얹으면 왼쪽 끝에 뭉개진다.
+   그래서 알람 직전 12초까지 되감은 0.5초 간격 계열을 따로 만든다. 축이 달라 run 샘플과
+   섞지 않고 탐지 카드만 이걸 쓴다. */
+export const DETECT_LEAD_MS = 12_000;              // 알람 이전 · 평상시 구간
+export const DETECT_SPAN_MS = DETECT_LEAD_MS + 8_000; // 탐지 단계는 t=8초에 끝난다
+export const DETECT_AMP_BASE = 168;
+export const DETECT_CW_BASE = 182;
+export const DETECT_STATIC_MS = 500;
+
+export interface DetectPoint {
+  /** run 기준 시각(ms). 음수 = 알람 이전 */
+  t: number;
+  /** CJ 온스타일 적립 P99 실측 */
+  p99: number;
+  /** AMP 동적 임계 */
+  amp: number;
+  /** CloudWatch 동적 임계 */
+  cw: number;
+}
+
+/**
+ * 동적 임계는 최근 30분 창을 굴려 재계산되므로 몇 ms 단위로 계속 움직인다 — 그 미세한 흔들림이
+ * "동적"의 근거라 그래프에 그대로 남긴다. 반대로 방송 시작 후의 급등은 30분 창에서 아직
+ * 소수점이라 임계가 따라 올라가지 않는다. 이 시차가 곧 이탈 탐지다.
+ */
+export function buildDetectSeries(): DetectPoint[] {
+  const out: DetectPoint[] = [];
+  for (let t = -DETECT_LEAD_MS; t <= DETECT_SPAN_MS - DETECT_LEAD_MS; t += 500) {
+    const i = t / 500;
+    const wob = Math.sin(t / 4_200) * 3.4 + jitter(i + 21, 2.2);
+    out.push({
+      t,
+      // 알람 이전은 평상시 P99(128ms대)로 눕는다 — onstyleP99 는 0초부터만 정의된다
+      p99: Math.round(onstyleP99(Math.max(0, t)) + jitter(i + 5, 14) + (t < 0 ? jitter(i + 31, 7) : 0)),
+      amp: Math.round(DETECT_AMP_BASE + wob),
+      cw: Math.round(DETECT_CW_BASE + wob * 0.8 + Math.sin(t / 6_100) * 2.6),
+    });
+  }
+  return out;
+}
+
 const QUOTA_STEPS: AgentStep[] = [
   /* ── Agent 1 · 트래픽 기반 동적 자원 효율화 ──
      이번 경로는 재분배가 아니라 스케일링 에스컬레이션(노드풀 격리)이다.

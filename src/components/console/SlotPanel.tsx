@@ -1,5 +1,9 @@
 import { TENANTS, TENANT_ORDER } from '../../lib/tenants';
-import { BUSINESS_EVENTS, FORECAST } from '../../lib/mockRun';
+import {
+  BUSINESS_EVENTS, FORECAST,
+  buildDetectSeries, DETECT_LEAD_MS, DETECT_SPAN_MS, DETECT_STATIC_MS,
+  type DetectPoint,
+} from '../../lib/mockRun';
 import type { AgentId, Phase, Projection, TenantKey, TenantSample } from '../../lib/types';
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
@@ -312,68 +316,156 @@ function CollectProgressCard({ t }: { t: number }) {
   );
 }
 
-/* ── 탐지 · 동적 베이스라인 이탈 (Agent 2) ───── */
-const DETECT_AMP_BASELINE = 168;
-const DETECT_CW_BASELINE = 182;
-const DETECT_STATIC_THRESHOLD = 500;
+/* ── 탐지 · 동적 베이스라인 이탈 (Agent 2) ─────────
+   보여줄 게 둘이라 축을 둘 다 바꿨다.
+   ① 세로는 로그축 — 14ms 짜리 임계 간격(AMP 168 · CW 182)과 673ms 급등을 한 화면에 같이 담아야 한다.
+      선형축에선 베이스라인이 1.5% 두께 실선으로 뭉개져 "동적"인지 보이지가 않는다.
+   ② 가로는 탐지 구간 20초(리드인 12초 + 탐지 8초)만 — 80초 run 축에 얹으면 왼쪽 7%에 뭉개진다. */
+const D_W = 400, D_H = 210;
+const D_Y_LO = 100, D_Y_HI = 900;
+// 200 눈금은 뺐다 — 로그축에서 베이스라인(~182) 라벨과 7px 차이라 글자가 겹친다
+const D_TICKS = [300, 500];
+const DETECT_SERIES = buildDetectSeries();
 
-const DETECT_CHART_W = 320;
-const DETECT_CHART_H = 200;
-const DETECT_Y_MAX = 900;
+const dY = (v: number) => {
+  const c = Math.min(D_Y_HI, Math.max(D_Y_LO, v));
+  return D_H - ((Math.log(c) - Math.log(D_Y_LO)) / (Math.log(D_Y_HI) - Math.log(D_Y_LO))) * D_H;
+};
+const dYPct = (v: number) => (dY(v) / D_H) * 100;
+const dX = (t: number) => ((t + DETECT_LEAD_MS) / DETECT_SPAN_MS) * D_W;
+const dXPct = (t: number) => ((t + DETECT_LEAD_MS) / DETECT_SPAN_MS) * 100;
+const dPt = (p: DetectPoint, v: number) => `${dX(p.t).toFixed(1)},${dY(v).toFixed(1)}`;
 
-/** 베이스라인 밴드(168~182ms) + 정적 임계값(500ms) + 실측 P99 추이를 그래프 하나로 — 라벨은 그래프 위에 얹는다
-    (텍스트 줄로 나열하던 수치를 전부 이 안으로 흡수했다) */
-function DetectMiniChart({ samples, idx, breached }: { samples: TenantSample[]; idx: number; breached: boolean }) {
-  const shown = samples.slice(0, idx + 1);
-  const xOf = (i: number) => (i / Math.max(1, samples.length - 1)) * DETECT_CHART_W;
-  const yOf = (v: number) => DETECT_CHART_H - (Math.min(v, DETECT_Y_MAX) / DETECT_Y_MAX) * DETECT_CHART_H;
-  const pctOf = (v: number) => (1 - Math.min(v, DETECT_Y_MAX) / DETECT_Y_MAX) * 100;
+const LegendKey = ({ swatch, label }: { swatch: React.ReactNode; label: string }) => (
+  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+    {swatch}
+    <span style={{ fontSize: 11.6, color: 'var(--ink-3)' }}>{label}</span>
+  </span>
+);
+
+/** 동적 임계 밴드 + 정적 임계값 + 실측 P99 를 하나의 시계열로. 이탈분은 면적으로 칠한다. */
+function DetectMiniChart({ shown, breachAt, staticAt }: { shown: DetectPoint[]; breachAt: number; staticAt: number }) {
+  // 이탈 구간은 직전 점부터 이어 그려야 선이 끊기지 않는다
+  const over = breachAt >= 0 ? shown.slice(Math.max(0, breachAt - 1)) : [];
+  const band = shown.map((p) => dPt(p, p.cw)).join(' ') + ' '
+    + [...shown].reverse().map((p) => dPt(p, p.amp)).join(' ');
+  const excess = over.length > 1
+    ? over.map((p) => dPt(p, p.p99)).join(' ') + ' ' + [...over].reverse().map((p) => dPt(p, p.cw)).join(' ')
+    : '';
+  const bp = breachAt >= 0 ? shown[breachAt] : null;
+  const sp = staticAt >= 0 ? shown[staticAt] : null;
+
   return (
-    <div style={{ position: 'relative', width: '100%', flexGrow: 1, minHeight: 0 }}>
-      <svg viewBox={`0 0 ${DETECT_CHART_W} ${DETECT_CHART_H}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }} role="img" aria-label="동적 베이스라인 대비 실측 P99 추이">
-        <rect x={0} y={yOf(DETECT_CW_BASELINE)} width={DETECT_CHART_W} height={Math.max(0, yOf(DETECT_AMP_BASELINE) - yOf(DETECT_CW_BASELINE))} fill="rgba(144,133,233,.20)" />
-        <line x1="0" y1={yOf(DETECT_STATIC_THRESHOLD)} x2={DETECT_CHART_W} y2={yOf(DETECT_STATIC_THRESHOLD)} stroke="var(--warn)" strokeWidth="2.6" strokeDasharray="6 5" vectorEffect="non-scaling-stroke" />
-        <polyline
-          fill="none" stroke="#d03b3b" strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"
-          points={shown.map((sm, i) => `${xOf(i).toFixed(1)},${yOf(sm.p99.cgv).toFixed(1)}`).join(' ')}
-        />
-      </svg>
-      <span style={{ position: 'absolute', right: 8, top: `${pctOf(DETECT_CW_BASELINE)}%`, transform: 'translateY(-100%)', fontSize: 16.1, color: '#9085e9', fontWeight: 600, whiteSpace: 'nowrap', textAlign: 'right' }}>
-        AMP 168ms · CloudWatch 182ms — 최근 30분 동적 베이스라인
-      </span>
-      <span style={{ position: 'absolute', right: 8, top: `${pctOf(DETECT_STATIC_THRESHOLD)}%`, transform: 'translateY(-100%)', fontSize: 16.1, color: 'var(--warn)', fontWeight: 700, whiteSpace: 'nowrap', textAlign: 'right' }}>
-        정적 임계값 500ms (세이프티넷)
-      </span>
-      {breached && (
-        <div
-          style={{
-            position: 'absolute', top: '6%', left: '50%', transform: 'translateX(-50%)', width: 'min(86%, 403px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9.6, textAlign: 'center',
-            background: 'rgba(208,59,59,.18)', border: '1.5px solid #d03b3b', borderRadius: 8.8, padding: '10.4px 14.4px',
-          }}
-        >
-          <svg width="18.4" height="18.4" viewBox="0 0 24 24" fill="none" stroke="#d03b3b" strokeWidth="2.6" strokeLinecap="round" style={{ flexShrink: 0 }}>
-            <path d="M12 8v5" /><path d="M12 16.5v.5" /><circle cx="12" cy="12" r="9" />
-          </svg>
-          <span style={{ fontSize: 14.4, fontWeight: 800, color: '#d03b3b' }}>동적 베이스라인을 벗어남!</span>
-        </div>
-      )}
+    <div style={{ position: 'relative', flexGrow: 1, minHeight: 0, paddingRight: 42 }}>
+      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+        <svg viewBox={`0 0 ${D_W} ${D_H}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }} role="img" aria-label="동적 베이스라인 대비 CJ 온스타일 적립 P99 추이">
+          {D_TICKS.map((v) => (
+            <line key={v} x1={0} y1={dY(v)} x2={D_W} y2={dY(v)} stroke="var(--hair)" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+          ))}
+
+          {/* 정적 임계값 — 세이프티넷 */}
+          <line x1={0} y1={dY(DETECT_STATIC_MS)} x2={D_W} y2={dY(DETECT_STATIC_MS)} stroke="var(--warn)" strokeWidth={2.2} strokeDasharray="7 5" vectorEffect="non-scaling-stroke" />
+
+          {/* 동적 임계 — AMP·CloudWatch 두 선과 그 사이 밴드. 계속 미세하게 움직인다 */}
+          <polygon points={band} fill="rgba(144,133,233,.26)" />
+          <polyline fill="none" points={shown.map((p) => dPt(p, p.cw)).join(' ')} stroke="#9085e9" strokeWidth={2.2} vectorEffect="non-scaling-stroke" />
+          <polyline fill="none" points={shown.map((p) => dPt(p, p.amp)).join(' ')} stroke="#9085e9" strokeWidth={1.4} strokeOpacity={0.6} vectorEffect="non-scaling-stroke" />
+
+          {/* 이탈분 — 임계 위로 삐져나간 면적을 통째로 칠한다. 이게 제일 먼저 눈에 들어와야 한다 */}
+          {excess && <polygon points={excess} fill="rgba(208,59,59,.34)" />}
+
+          {/* 실측 P99 — 밴드 안은 차분하게, 이탈 후는 굵은 빨강 */}
+          <polyline fill="none" points={shown.map((p) => dPt(p, p.p99)).join(' ')} stroke="var(--ink-3)" strokeWidth={2.4} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          {over.length > 1 && (
+            <polyline fill="none" points={over.map((p) => dPt(p, p.p99)).join(' ')} stroke="#d03b3b" strokeWidth={4.4} strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          )}
+          {bp && (
+            <line x1={dX(bp.t)} y1={dY(bp.p99)} x2={dX(bp.t)} y2={D_H} stroke="#d03b3b" strokeWidth={1.3} strokeDasharray="4 4" vectorEffect="non-scaling-stroke" />
+          )}
+        </svg>
+
+        {/* 표식은 HTML 로 얹는다 — SVG 가 가로로 늘어나 원이 타원이 되는 걸 피한다 */}
+        {bp && <Dot x={dXPct(bp.t)} y={dYPct(bp.p99)} color="#d03b3b" />}
+        {sp && <Dot x={dXPct(sp.t)} y={dYPct(sp.p99)} color="var(--warn)" />}
+        {bp && (
+          <span className="mono" style={{ position: 'absolute', left: `${dXPct(bp.t)}%`, top: `${dYPct(bp.p99)}%`, transform: 'translate(9px, -155%)', fontSize: 11.4, fontWeight: 700, color: '#d03b3b', whiteSpace: 'nowrap' }}>
+            이탈 t+{(bp.t / 1000).toFixed(1)}s
+          </span>
+        )}
+
+        {shown.length > 0 && shown[shown.length - 1].p99 > shown[shown.length - 1].cw && (
+          <div
+            style={{
+              position: 'absolute', top: 2, left: '50%', transform: 'translateX(-50%)',
+              display: 'inline-flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap',
+              background: 'rgba(208,59,59,.20)', border: '1.5px solid #d03b3b', borderRadius: 8, padding: '6px 12px',
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d03b3b" strokeWidth="2.6" strokeLinecap="round" style={{ flexShrink: 0 }}>
+              <path d="M12 8v5" /><path d="M12 16.5v.5" /><circle cx="12" cy="12" r="9" />
+            </svg>
+            <span style={{ fontSize: 13.4, fontWeight: 800, color: '#d03b3b' }}>동적 베이스라인을 벗어남!</span>
+          </div>
+        )}
+      </div>
+
+      {/* 오른쪽 여백에 눈금값 — 그래프 위로 겹치지 않는다 */}
+      <span style={{ position: 'absolute', right: 0, top: `${dYPct(DETECT_STATIC_MS)}%`, transform: 'translateY(-50%)', fontSize: 11.4, fontWeight: 700, color: 'var(--warn)', whiteSpace: 'nowrap' }}>500</span>
+      {D_TICKS.filter((v) => v !== DETECT_STATIC_MS).map((v) => (
+        <span key={v} style={{ position: 'absolute', right: 0, top: `${dYPct(v)}%`, transform: 'translateY(-50%)', fontSize: 11, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>{v}</span>
+      ))}
+      <span style={{ position: 'absolute', right: 0, top: `${dYPct(178)}%`, transform: 'translateY(-50%)', fontSize: 11, color: '#9085e9', fontWeight: 700, whiteSpace: 'nowrap' }}>~182</span>
     </div>
   );
 }
 
-function DetectAnomalyCard({ sample, samples, idx }: { sample: TenantSample; samples: TenantSample[]; idx: number }) {
-  const now = sample.p99.cgv;
-  const breached = now > Math.max(DETECT_AMP_BASELINE, DETECT_CW_BASELINE);
+const Dot = ({ x, y, color }: { x: number; y: number; color: string }) => (
+  <span style={{
+    position: 'absolute', left: `${x}%`, top: `${y}%`, transform: 'translate(-50%,-50%)',
+    width: 9, height: 9, borderRadius: '50%', background: color, boxShadow: '0 0 0 2px var(--surface)',
+  }} />
+);
+
+function DetectAnomalyCard({ t }: { t: number }) {
+  const shown = DETECT_SERIES.filter((p) => p.t <= t);
+  if (shown.length === 0) return <div className="card" style={card({ flexGrow: 1 })} />;
+
+  const last = shown[shown.length - 1];
+  const breachAt = shown.findIndex((p) => p.p99 > p.cw);
+  const staticAt = shown.findIndex((p) => p.p99 > DETECT_STATIC_MS);
+  const breached = last.p99 > last.cw;
+  const ratio = last.p99 / last.cw;
+
+  // 이 화면의 논거 — 동적 베이스라인이 정적 임계값보다 먼저 잡는다
+  const foot = breachAt < 0
+    ? '실측 P99 가 동적 임계 아래 — 정상 범위'
+    : staticAt < 0
+      ? `동적 베이스라인 t+${(shown[breachAt].t / 1000).toFixed(1)}s 이탈 · 정적 임계값(500ms)은 아직 미도달`
+      : `동적 t+${(shown[breachAt].t / 1000).toFixed(1)}s · 정적 t+${(shown[staticAt].t / 1000).toFixed(1)}s — ${((shown[staticAt].t - shown[breachAt].t) / 1000).toFixed(1)}초 먼저 잡았다`;
+
   return (
-    <div className={breached ? 'card card-alert' : 'card'} style={card({ flexGrow: 1, flexShrink: 1, minHeight: 92, justifyContent: 'flex-start', gap: 10 })}>
+    <div className={breached ? 'card card-alert' : 'card'} style={card({ flexGrow: 1, flexShrink: 1, minHeight: 92, justifyContent: 'flex-start', gap: 8 })}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 9.2, flexShrink: 0, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 15.7, fontWeight: 600 }}>이상 탐지 — 동적 베이스라인</span>
         <span style={{ fontSize: 12.6, color: 'var(--ink-3)' }}>포인트 적립 P99 · CJ 온스타일</span>
         <span style={{ flexGrow: 1 }} />
-        <span className="mono" style={{ fontSize: 27, fontWeight: 800, color: breached ? '#d03b3b' : 'var(--ink)' }}>{now.toLocaleString('ko-KR')}ms</span>
+        {breached && (
+          <span className="mono" style={{ fontSize: 12.6, fontWeight: 700, color: '#d03b3b' }}>베이스라인 ×{ratio.toFixed(1)}</span>
+        )}
+        <span className="mono" style={{ fontSize: 27, fontWeight: 800, color: breached ? '#d03b3b' : 'var(--ink)' }}>{last.p99.toLocaleString('ko-KR')}ms</span>
       </div>
-      <DetectMiniChart samples={samples} idx={idx} breached={breached} />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap', flexShrink: 0 }}>
+        <LegendKey label="적립 P99 실측" swatch={<span style={{ width: 13, height: 3, borderRadius: 2, background: '#d03b3b' }} />} />
+        <LegendKey label="동적 임계 AMP·CloudWatch (최근 30분 학습)" swatch={<span style={{ width: 13, height: 7, borderRadius: 2, background: 'rgba(144,133,233,.45)', border: '1px solid #9085e9' }} />} />
+        <LegendKey label="정적 임계값 500ms" swatch={<span style={{ width: 13, height: 0, borderTop: '2px dashed var(--warn)' }} />} />
+      </div>
+
+      <DetectMiniChart shown={shown} breachAt={breachAt} staticAt={staticAt} />
+
+      <div style={{ flexShrink: 0, fontSize: 12.2, color: breachAt >= 0 ? 'var(--ink-2)' : 'var(--ink-3)', borderTop: '1px solid var(--hair)', paddingTop: 7 }}>
+        {foot}
+      </div>
     </div>
   );
 }
@@ -469,7 +561,7 @@ export default function Slot({ agent, phase, t, sample, samples, idx, sloMs, pro
     return <SummaryCard agent={agent} usage={usage} durationMs={durationMs} />;
   }
 
-  if (phase === 'detect') return <DetectAnomalyCard sample={sample} samples={samples} idx={idx} />;
+  if (phase === 'detect') return <DetectAnomalyCard t={t} />;
   if (phase === 'collect') return <CollectProgressCard t={t} />;
   if (phase === 'diagnose') return <P99Card samples={samples} idx={idx} sloMs={sloMs} tenants={TENANT_ORDER.filter((k) => k !== 'oliveyoung')} />;
   if (phase === 'act') return <P99Card samples={samples} idx={idx} sloMs={sloMs} tenants={TENANT_ORDER.filter((k) => k !== 'oliveyoung')} alertOnBreach={false} />;
