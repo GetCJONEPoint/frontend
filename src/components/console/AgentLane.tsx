@@ -678,7 +678,7 @@ export default function AgentLane({
         }
 
         // 쿨다운 헤더(q-cool)는 뒤에 모니터링 로그가 쌓여도 접히지 않고 맨 위 '메인 글'로 고정된다
-        // '수집 소스 스캔'(i-collect)도 접히지 않는다 — 바로 아래 '장애 등급 산출 → 프롬프트 제작' 이 뜬 뒤에도 둘 다 제목+본문 그대로 남아있어야 한다
+        // '수집 소스 스캔'(i-collect)도 접히지 않는다 — 뒤이어 '장애 등급 산출' · '프롬프트 제작' 이 쌓여도 무엇을 모았는지는 계속 보여야 한다
         const folded = si < visibleSteps.length - 1 && s.id !== 'q-cool' && s.id !== 'i-collect';
         if (folded) {
           return (

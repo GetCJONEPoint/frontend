@@ -265,48 +265,46 @@ function SummaryCard({ agent, usage, durationMs }: { agent: AgentId; usage: { in
   );
 }
 
-/* ── 데이터 수집 (Agent 2) — ArgoCD·비즈니스 이벤트·Loki·프롬프트 제작을 진행형 단계로 크게 ── */
-const COLLECT_STEPS: { k: string; v: string; tone: 'dim' | 'warn' | 'crit' }[] = [
-  { k: 'ArgoCD', v: '최근 배포 없음', tone: 'dim' },
-  { k: 'DynamoDB', v: '비즈니스 이벤트CJ 온스타일 라이브 커머스 방송', tone: 'warn' },
-  { k: 'Loki', v: '최근 5분 ERROR 612건', tone: 'crit' },
-  { k: '프롬프트 제작', v: '정형 템플릿 + 장애 등급 G1~G3', tone: 'dim' },
+/* ── 데이터 수집 (Agent 2) — 진행형 단계로 크게 ──
+   at 은 mockRun 의 collect 스텝 시각과 짝이다. 소스 3종이 전부 초록으로 바뀐 뒤(9.6s)에야
+   오른쪽에 '장애 등급 산출'(i-grade, 10.4s)이 뜬다 — 모아둔 게 있어야 등급을 매길 수 있으니
+   순서가 뒤집히면 안 된다. 한쪽만 고치면 어긋나므로 같이 옮길 것. */
+const COLLECT_STEPS: { k: string; v: string; at: number }[] = [
+  { k: 'ArgoCD', v: '최근 배포 없음', at: 8_000 },
+  { k: 'DynamoDB', v: '라이브 커머스 방송 시작', at: 8_800 },
+  { k: 'Loki', v: 'ERROR 612건 / 5분', at: 9_600 },
+  { k: '장애 등급 산출', v: 'G1 지연 — 규칙 판정', at: 10_400 },
+  { k: '프롬프트 제작', v: '정형 템플릿 슬롯 4개', at: 12_400 },
 ];
 
-// 탐지가 끝나고 데이터 수집이 시작되는 바로 그 순간(i-collect, t=8s) 1·2·3(ArgoCD·비즈니스 이벤트·Loki)이 순서대로 체크된다
-const COLLECT_SCAN_T = 8_000;
-const COLLECT_SCAN_STAGGER = 900;
-const COLLECT_SCAN_COUNT = 4; // 1·2·3에 이어 4(프롬프트 제작)도 순차 체크된다 — i-collect 박스의 '장애 등급 산출 → 프롬프트 제작' 문구(t=10.7s)와 맞물린다
-
+// 단계가 5개로 늘어 행 치수를 줄였다 — 예전 4개 치수(원 36 · 라벨 19)로는 720px 높이에서 마지막 행이 잘린다
 function CollectProgressCard({ t }: { t: number }) {
   return (
-    <div className="card" style={card({ flexGrow: 1, flexShrink: 1, minHeight: 92, justifyContent: 'flex-start', gap: 18 })}>
-      <span style={{ fontSize: 17, fontWeight: 600, flexShrink: 0 }}>데이터 수집</span>
+    <div className="card" style={card({ flexGrow: 1, flexShrink: 1, minHeight: 92, justifyContent: 'flex-start', gap: 10 })}>
+      <span style={{ fontSize: 15.5, fontWeight: 600, flexShrink: 0 }}>데이터 수집</span>
       <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, justifyContent: 'space-evenly' }}>
         {COLLECT_STEPS.map((s, i) => {
-          const scanned = i < COLLECT_SCAN_COUNT;
-          const checkedAt = COLLECT_SCAN_T + i * COLLECT_SCAN_STAGGER;
-          const checked = scanned && t >= checkedAt;
+          const checked = t >= s.at;
           return (
-            <div key={s.k} style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+            <div key={s.k} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
               <span
                 className="mono"
                 style={{
-                  width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+                  width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
                   background: checked ? '#8bc34a' : 'var(--ink-3)', color: checked ? '#ffffff' : '#0b0b0d',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15.5, fontWeight: 800,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13.5, fontWeight: 800,
                   transition: 'background .3s ease',
                 }}
               >
                 {checked ? (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="3.8" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="3.8" strokeLinecap="round" strokeLinejoin="round">
                     <path d="m5 12.5 4.5 4.5L19 7" />
                   </svg>
                 ) : (i + 1)}
               </span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
-                <span style={{ fontSize: 19, fontWeight: 700, color: checked ? '#ffffff' : 'var(--ink-3)', transition: 'color .3s ease' }}>{s.k}</span>
-                <span className="mono" style={{ fontSize: 15.4, color: 'var(--ink-2)', lineHeight: 1.55, overflowWrap: 'break-word' }}>{s.v}</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                <span style={{ fontSize: 16, fontWeight: 700, color: checked ? '#ffffff' : 'var(--ink-3)', transition: 'color .3s ease' }}>{s.k}</span>
+                <span className="mono" style={{ fontSize: 13, color: 'var(--ink-2)', lineHeight: 1.45, overflowWrap: 'break-word' }}>{s.v}</span>
               </div>
             </div>
           );

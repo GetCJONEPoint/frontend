@@ -498,24 +498,42 @@ const INCIDENT_STEPS: AgentStep[] = [
     },
   },
   {
-    // '수집 소스 스캔' 바로 다음 순간 곧바로 뜬다 — 로그 칸에 빈 공간을 남기지 않는다
-    id: 'i-prompt', t: 8_100, agent: 'incident', phase: 'collect',
+    /* 소스 3종(ArgoCD·DynamoDB·Loki)이 왼쪽 카드에서 전부 초록으로 바뀐 뒤(t=9.6s)에 뜬다.
+       모아둔 게 있어야 등급을 매길 수 있으니 순서가 뒤집히면 안 된다 — SlotPanel 의 COLLECT_STEPS 와 같은 시각을 쓴다. */
+    id: 'i-grade', t: 10_400, agent: 'incident', phase: 'collect',
     state: '전처리 Lambda · 장애 등급 산출', executor: 'code',
-    title: '장애 등급 산출 → 프롬프트 제작',
+    title: '장애 등급 산출',
+    detail: '등급은 LLM 이 아니라 규칙이 매긴다 — 같은 입력이면 항상 같은 등급이 나와야 조치 범위와 승인 등급이 흔들리지 않는다.',
     payload: {
       lines: [
-        '[정규화 트리거] + [수집 데이터] + [장애 등급] + [출력 스키마]',
+        'G1 지연        에러율 < 1%  ·  P99 > SLO',
+        'G2 부분 실패   에러율 1~10%',
+        'G3 전면 중단   에러율 > 10%',
         '',
-        'G1 지연        P99 > SLO(1.0s) · 에러율 정상',
-        'G2 부분 실패   에러율 1~10% 또는 일부 테넌트',
-        'G3 전면 중단   에러율 > 10% · 전 테넌트',
-        '',
-        '이번 케이스 → G1 · P99 2.4s (SLO 240% 초과) · 에러율 정상 — 지연이지 장애는 아니다',
+        '입력  적립 P99 2,400ms / SLO 1,000ms (240%)  ·  에러율 0.3%  ·  영향 3/4 테넌트',
+        '판정  G1 지연 — 느려진 것이지 끊긴 것은 아니다 (에러율 정상)',
+        '후속  G1 → 조치 조합 상한 5개  ·  위험도 T2 이상이면 사람 승인',
       ],
     },
   },
   {
-    id: 'i-tool-metric', t: 13_500, agent: 'incident', phase: 'diagnose',
+    id: 'i-prompt', t: 12_400, agent: 'incident', phase: 'collect',
+    state: '전처리 Lambda · 프롬프트 제작', executor: 'code',
+    title: '프롬프트 제작',
+    detail: '자유 서술이 아니라 고정 슬롯 4개를 채운 정형 템플릿이다 — 같은 상황이면 같은 프롬프트가 나와야 진단 결과를 서로 비교할 수 있다.',
+    payload: {
+      lines: [
+        '[정규화 트리거]  AMP · CloudWatch · 정적 알람 3소스 → 단일 형식  ·  중복 체크 결과 신규 건',
+        '[수집 데이터]    ArgoCD 배포 없음  ·  방송 시작 10:02 KST  ·  Loki ERROR 612건',
+        '[장애 등급]      G1 지연  ·  P99 SLO 240%  ·  에러율 정상',
+        '[출력 스키마]    root_cause[] · evidence[] · confidence · runbook_ids[]',
+        '',
+        '완성 프롬프트 → 다음 단계 진단 모델 호출의 입력이 된다',
+      ],
+    },
+  },
+  {
+    id: 'i-tool-metric', t: 14_500, agent: 'incident', phase: 'diagnose',
     state: '진단 에이전트 (Bedrock) · 도구 호출', executor: 'llm',
     model: MODEL_ID, tokens: { in: 13_200, out: 990 },
     title: '사용한 도구',
