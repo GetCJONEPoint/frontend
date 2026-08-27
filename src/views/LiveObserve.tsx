@@ -1,5 +1,12 @@
 import ObservePanel from '../components/console/ObservePanel';
 import { useLiveMetrics } from '../lib/liveMetrics';
+import type { Projection } from '../lib/types';
+
+// 실시간 뷰는 리플레이 투영을 쓰지 않는다 — Slot(agent='quota', phase='detect') 은 projection 을 참조하지 않으므로 자리만 채운다.
+const LIVE_PROJECTION: Projection = {
+  tenant: 'oliveyoung', currentRps: 0, quota: 0, horizonMin: 0, slopePerMin: 0,
+  trendRps: 0, eventRps: 0, expectedRps: 0, needRps: 0, poolFreeRps: 0,
+};
 
 // mockRun.ts의 SLO_MS와 동일 — 리플레이 화면과 기준선을 맞춘다.
 const SLO_MS = 300;
@@ -30,9 +37,13 @@ export default function LiveObserve() {
           samples={samples}
           idx={samples.length - 1}
           sloMs={SLO_MS}
-          posCalls={[]}
           tenantTotal={4}
           usage={usage}
+          agent="quota"
+          phase="detect"
+          t={0}
+          durationMs={0}
+          projection={LIVE_PROJECTION}
         />
       </div>
     </div>

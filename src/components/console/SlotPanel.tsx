@@ -269,10 +269,10 @@ const COLLECT_STEPS: { k: string; v: string; tone: 'dim' | 'warn' | 'crit' }[] =
   { k: '프롬프트 제작', v: '정형 템플릿 + 장애 등급 G1~G3', tone: 'dim' },
 ];
 
-// '수집 소스 스캔' 로그(i-collect)가 뜨는 시각과 맞물려 1·2·3(ArgoCD·비즈니스 이벤트·Loki)이 순서대로 체크된다
-const COLLECT_SCAN_T = 16_000;
-const COLLECT_SCAN_STAGGER = 1_100;
-const COLLECT_SCAN_COUNT = 3; // '프롬프트 제작'(4번째)은 이 체크 애니메이션 대상이 아니다
+// 탐지가 끝나고 데이터 수집이 시작되는 바로 그 순간(i-collect, t=8s) 1·2·3(ArgoCD·비즈니스 이벤트·Loki)이 순서대로 체크된다
+const COLLECT_SCAN_T = 8_000;
+const COLLECT_SCAN_STAGGER = 900;
+const COLLECT_SCAN_COUNT = 4; // 1·2·3에 이어 4(프롬프트 제작)도 순차 체크된다 — i-collect 박스의 '장애 등급 산출 → 프롬프트 제작' 문구(t=10.7s)와 맞물린다
 
 function CollectProgressCard({ t }: { t: number }) {
   return (
@@ -323,7 +323,7 @@ const DETECT_Y_MAX = 900;
 
 /** 베이스라인 밴드(168~182ms) + 정적 임계값(500ms) + 실측 P99 추이를 그래프 하나로 — 라벨은 그래프 위에 얹는다
     (텍스트 줄로 나열하던 수치를 전부 이 안으로 흡수했다) */
-function DetectMiniChart({ samples, idx }: { samples: TenantSample[]; idx: number }) {
+function DetectMiniChart({ samples, idx, breached }: { samples: TenantSample[]; idx: number; breached: boolean }) {
   const shown = samples.slice(0, idx + 1);
   const xOf = (i: number) => (i / Math.max(1, samples.length - 1)) * DETECT_CHART_W;
   const yOf = (v: number) => DETECT_CHART_H - (Math.min(v, DETECT_Y_MAX) / DETECT_Y_MAX) * DETECT_CHART_H;
@@ -332,18 +332,32 @@ function DetectMiniChart({ samples, idx }: { samples: TenantSample[]; idx: numbe
     <div style={{ position: 'relative', width: '100%', flexGrow: 1, minHeight: 0 }}>
       <svg viewBox={`0 0 ${DETECT_CHART_W} ${DETECT_CHART_H}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }} role="img" aria-label="동적 베이스라인 대비 실측 P99 추이">
         <rect x={0} y={yOf(DETECT_CW_BASELINE)} width={DETECT_CHART_W} height={Math.max(0, yOf(DETECT_AMP_BASELINE) - yOf(DETECT_CW_BASELINE))} fill="rgba(144,133,233,.20)" />
-        <line x1="0" y1={yOf(DETECT_STATIC_THRESHOLD)} x2={DETECT_CHART_W} y2={yOf(DETECT_STATIC_THRESHOLD)} stroke="var(--warn)" strokeWidth="1.6" strokeDasharray="6 5" vectorEffect="non-scaling-stroke" />
+        <line x1="0" y1={yOf(DETECT_STATIC_THRESHOLD)} x2={DETECT_CHART_W} y2={yOf(DETECT_STATIC_THRESHOLD)} stroke="var(--warn)" strokeWidth="2.6" strokeDasharray="6 5" vectorEffect="non-scaling-stroke" />
         <polyline
-          fill="none" stroke="#d03b3b" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"
+          fill="none" stroke="#d03b3b" strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke"
           points={shown.map((sm, i) => `${xOf(i).toFixed(1)},${yOf(sm.p99.cgv).toFixed(1)}`).join(' ')}
         />
       </svg>
-      <span style={{ position: 'absolute', left: 6, top: `${pctOf(DETECT_CW_BASELINE)}%`, transform: 'translateY(-100%)', fontSize: 12.4, color: '#9085e9', fontWeight: 600, whiteSpace: 'nowrap' }}>
+      <span style={{ position: 'absolute', right: 8, top: `${pctOf(DETECT_CW_BASELINE)}%`, transform: 'translateY(-100%)', fontSize: 16.1, color: '#9085e9', fontWeight: 600, whiteSpace: 'nowrap', textAlign: 'right' }}>
         AMP 168ms · CloudWatch 182ms — 최근 30분 동적 베이스라인
       </span>
-      <span style={{ position: 'absolute', left: 6, top: `${pctOf(DETECT_STATIC_THRESHOLD)}%`, transform: 'translateY(-100%)', fontSize: 12.4, color: 'var(--warn)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+      <span style={{ position: 'absolute', right: 8, top: `${pctOf(DETECT_STATIC_THRESHOLD)}%`, transform: 'translateY(-100%)', fontSize: 16.1, color: 'var(--warn)', fontWeight: 700, whiteSpace: 'nowrap', textAlign: 'right' }}>
         정적 임계값 500ms (세이프티넷)
       </span>
+      {breached && (
+        <div
+          style={{
+            position: 'absolute', top: '6%', left: '50%', transform: 'translateX(-50%)', width: 'min(86%, 403px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9.6, textAlign: 'center',
+            background: 'rgba(208,59,59,.18)', border: '1.5px solid #d03b3b', borderRadius: 8.8, padding: '10.4px 14.4px',
+          }}
+        >
+          <svg width="18.4" height="18.4" viewBox="0 0 24 24" fill="none" stroke="#d03b3b" strokeWidth="2.6" strokeLinecap="round" style={{ flexShrink: 0 }}>
+            <path d="M12 8v5" /><path d="M12 16.5v.5" /><circle cx="12" cy="12" r="9" />
+          </svg>
+          <span style={{ fontSize: 14.4, fontWeight: 800, color: '#d03b3b' }}>동적 베이스라인을 벗어남!</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -359,15 +373,7 @@ function DetectAnomalyCard({ sample, samples, idx }: { sample: TenantSample; sam
         <span style={{ flexGrow: 1 }} />
         <span className="mono" style={{ fontSize: 27, fontWeight: 800, color: breached ? '#d03b3b' : 'var(--ink)' }}>{now.toLocaleString('ko-KR')}ms</span>
       </div>
-      <DetectMiniChart samples={samples} idx={idx} />
-      {breached && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: 'rgba(208,59,59,.18)', border: '1.5px solid #d03b3b', borderRadius: 11, padding: '13px 18px', flexShrink: 0 }}>
-          <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="#d03b3b" strokeWidth="2.6" strokeLinecap="round" style={{ flexShrink: 0 }}>
-            <path d="M12 8v5" /><path d="M12 16.5v.5" /><circle cx="12" cy="12" r="9" />
-          </svg>
-          <span style={{ fontSize: 18, fontWeight: 800, color: '#d03b3b' }}>동적 베이스라인을 벗어남!</span>
-        </div>
-      )}
+      <DetectMiniChart samples={samples} idx={idx} breached={breached} />
     </div>
   );
 }
@@ -375,75 +381,19 @@ function DetectAnomalyCard({ sample, samples, idx }: { sample: TenantSample; sam
 /* ── 조치 · 런북 카탈로그 (Agent 2) ───────────
    13개 중 3개가 조합 상한 5개 안에서 선택된다. i-catalog(52s) → i-tier(56s) 구간에서
    하나씩 켜진다 — mockRun.ts 의 i-catalog/i-tier 타임스탬프와 맞춰둔 값이라 그쪽을 바꾸면 여기도 바꿔야 한다. */
-const CATALOG_REVEAL_START = 52_000;
-const CATALOG_REVEAL_END = 56_000;
-const CATALOG_CAP = 5;
-const CHOSEN_ORDER = ['RB-04', 'RB-05', 'RB-01'];
-const CATALOG_ROWS: { ids: string[]; label: string; tag?: string }[] = [
-  { ids: ['RB-01'], label: 'HPA 레플리카 상향', tag: 'k8s' },
-  { ids: ['RB-02'], label: '파드 롤링 재시작', tag: 'k8s' },
-  { ids: ['RB-03'], label: '테넌트 RPS 스로틀', tag: 'ratelimit' },
-  { ids: ['RB-04'], label: 'RDS Proxy 커넥션 풀', tag: 'rds' },
-  { ids: ['RB-05'], label: '슬로우 쿼리 종료', tag: '집행경로 없음' },
-  { ids: ['RB-06', 'RB-07'], label: '노드풀 격리 · 노드 cordon' },
-  { ids: ['RB-08', 'RB-09'], label: 'ArgoCD 롤백 · limit 상향' },
-  { ids: ['RB-10'], label: 'RLS Redis 재시작', tag: 'k8s' },
-  { ids: ['RB-11', 'RB-12'], label: '테넌트 통보 · 쿼터 핸드오프' },
-  { ids: ['RB-13'], label: '무조치 · 에스컬레이션', tag: 'notify' },
-];
-
-function RunbookCatalogCard({ t }: { t: number }) {
-  const ratio = clamp01((t - CATALOG_REVEAL_START) / (CATALOG_REVEAL_END - CATALOG_REVEAL_START));
-  const count = Math.min(CHOSEN_ORDER.length, Math.floor(ratio * CHOSEN_ORDER.length + 1e-6));
-  const chosenIds = new Set(CHOSEN_ORDER.slice(0, count));
-  return (
-    <div className="card" style={card({ flexGrow: 1, flexShrink: 1, minHeight: 92, justifyContent: 'flex-start', gap: 12 })}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 9.2, flexWrap: 'wrap', flexShrink: 0 }}>
-        <span style={{ fontSize: 17.5, fontWeight: 700 }}>런북 카탈로그 13개</span>
-        <span style={{ fontSize: 13, color: 'var(--ink-3)' }}>조치 1개 = 런북 1개 = 리소스 1개</span>
-        <span style={{ flexGrow: 1 }} />
-        <span className="mono" style={{ fontSize: 14.5, fontWeight: 700, color: count > 0 ? '#16a34a' : 'var(--ink-3)' }}>조합 {count}/{CATALOG_CAP}</span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flexGrow: 1, minHeight: 0, justifyContent: 'space-evenly' }}>
-        {CATALOG_ROWS.map((row) => {
-          const chosen = row.ids.some((id) => chosenIds.has(id));
-          return (
-            <div
-              key={row.ids.join('-')}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 12, padding: '10px 15px', borderRadius: 10,
-                border: chosen ? '1.5px solid #16a34a' : '1px solid var(--hair)',
-                background: chosen ? 'rgba(22,163,74,.14)' : 'var(--surface-2)',
-                transition: 'background .3s, border-color .3s',
-              }}
-            >
-              <span className="mono" style={{ fontSize: 14, fontWeight: 700, color: chosen ? '#16a34a' : 'var(--ink-3)', flexShrink: 0 }}>
-                {row.ids.join(' · ')}
-              </span>
-              <span style={{ fontSize: 15, color: chosen ? 'var(--ink)' : 'var(--ink-3)', flexGrow: 1 }}>{row.label}</span>
-              {row.tag && <span style={{ fontSize: 12.5, fontStyle: 'italic', color: 'var(--ink-3)', flexShrink: 0 }}>({row.tag})</span>}
-            </div>
-          );
-        })}
-      </div>
-      <div style={{ fontSize: 13.4, color: 'var(--ink-3)', borderTop: '1px solid var(--hair)', paddingTop: 9, lineHeight: 1.6, flexShrink: 0 }}>
-        RB-03 제외 — 원인은 수요가 아니라 처리 병목 · 티어 T2 · Slack 승인 · 타임아웃 600초
-      </div>
-    </div>
-  );
-}
-
-/* ── p99 (Agent 2 진단) ───────────────────────── */
+/* ── p99 (Agent 2 진단 · 조치) ───────────────────────── */
 const P_W = 560, P_H = 300, Y_MAX = 2400, TICKS = [1000, 2000];
-function P99Card({ samples, idx, sloMs, showGoalMark, tenants }: { samples: TenantSample[]; idx: number; sloMs: number; showGoalMark?: boolean; tenants?: TenantKey[] }) {
+function P99Card({ samples, idx, sloMs, showGoalMark, tenants, alertOnBreach = true }: { samples: TenantSample[]; idx: number; sloMs: number; showGoalMark?: boolean; tenants?: TenantKey[]; alertOnBreach?: boolean }) {
   const shown = samples.slice(0, idx + 1);
   const rows = tenants ?? TENANT_ORDER;
   const xOf = (i: number) => (i / (samples.length - 1)) * P_W;
   const yOf = (v: number) => P_H - (Math.min(v, Y_MAX) / Y_MAX) * P_H;
   // 목표(SLO) 도달 지점 — CJ 온스타일 P99 가 SLO 아래로 처음 내려온 순간을 짚어준다
   const goalIdx = showGoalMark ? shown.findIndex((sm) => sm.p99.cgv <= sloMs) : -1;
+  // 표시 중인 테넌트가 전부 SLO 를 넘은 시점부터 — 그래프 색은 그대로 두고 박스 전체를 빨갛게 깜빡인다 (탐지 페이지와 동일한 연출)
+  const allBreached = alertOnBreach && shown.length > 0 && rows.every((k) => shown[shown.length - 1].p99[k] > sloMs);
   return (
-    <div className="card" style={card({ flexGrow: 1, flexShrink: 1, minHeight: 92, gap: 6 })}>
+    <div className={allBreached ? 'card card-alert' : 'card'} style={card({ flexGrow: 1, flexShrink: 1, minHeight: 92, gap: 6 })}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 9.2, flexWrap: 'wrap', flexShrink: 0 }}>
         <span style={{ fontSize: 15.7, fontWeight: 600 }}>테넌트별 p99</span>
         <span style={{ fontSize: 12.9, color: 'var(--ink-3)' }}>SLO {sloMs}ms</span>
@@ -522,16 +472,8 @@ export default function Slot({ agent, phase, t, sample, samples, idx, sloMs, pro
   if (phase === 'detect') return <DetectAnomalyCard sample={sample} samples={samples} idx={idx} />;
   if (phase === 'collect') return <CollectProgressCard t={t} />;
   if (phase === 'diagnose') return <P99Card samples={samples} idx={idx} sloMs={sloMs} tenants={TENANT_ORDER.filter((k) => k !== 'oliveyoung')} />;
-  if (phase === 'act') return <RunbookCatalogCard t={t} />;
-  if (phase === 'cooldown') return (
-    <>
-      <LinesCard grow={false} title="마일스톤 확인" sub="모니터링 600초" lines={[
-        { k: 'M1', v: '4분 내 대기 커넥션 50건 이하 · +210s 38건', tone: 'good' },
-        { k: 'M2', v: '7분 내 P99 SLO(1.0s) 이내 · +260s 620ms', tone: 'good' },
-        { k: '미도달이면', v: '재진단 1회 → 2회째 사람에게 에스컬레이션', tone: 'dim' },
-      ]} />
-      <P99Card samples={samples} idx={idx} sloMs={sloMs} showGoalMark />
-    </>
-  );
+  if (phase === 'act') return <P99Card samples={samples} idx={idx} sloMs={sloMs} tenants={TENANT_ORDER.filter((k) => k !== 'oliveyoung')} alertOnBreach={false} />;
+  // 마일스톤 확인은 오른쪽 로그(i-watch)에 이미 있으므로 왼쪽은 그래프가 칸 전체를 크게 채운다
+  if (phase === 'cooldown') return <P99Card samples={samples} idx={idx} sloMs={sloMs} showGoalMark tenants={TENANT_ORDER.filter((k) => k !== 'oliveyoung')} />;
   return <SummaryCard agent={agent} usage={usage} durationMs={durationMs} />;
 }

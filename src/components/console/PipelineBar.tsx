@@ -74,11 +74,11 @@ export const LANES = [
     stageWidth: 190,
     stages: [
       { label: '탐지', phase: 'detect' as const, at: 8_000 },
-      { label: '데이터 수집', phase: 'collect' as const, at: 19_000 },
-      { label: '진단', phase: 'diagnose' as const, at: 38_000 },
-      { label: '조치', phase: 'act' as const, at: 68_000 },
-      { label: '쿨다운', phase: 'cooldown' as const, at: 78_000 },
-      { label: '종료', phase: 'done' as const, at: 90_000 },
+      { label: '데이터 수집', phase: 'collect' as const, at: 12_700 }, // '장애 등급 산출 → 프롬프트 제작'(t=10.7s) 노출 2초 뒤 다음 화면(진단)으로
+      { label: '진단', phase: 'diagnose' as const, at: 34_500 }, // '검증'(t=27.5s) 도 앞의 두 단계와 같은 7초씩 노출된 뒤 다음 화면(조치)으로
+      { label: '조치', phase: 'act' as const, at: 62_500 },
+      { label: '쿨다운', phase: 'cooldown' as const, at: 72_500 },
+      { label: '종료', phase: 'done' as const, at: 77_000 },
     ],
   },
 ];

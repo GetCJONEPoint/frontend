@@ -38,6 +38,7 @@ export default function AgentConsole() {
   // Agent 2 는 HITL(Slack 승인) 순간에 알림이 뜬다
   const hitlReached = focus === 'incident' && !!runs && runs.incident.steps.some((s) => s.id === 'i-hitl' && s.t <= i.t);
   useEffect(() => { if (!hitlReached) setHitlClosed(false); }, [hitlReached]);
+  // 팝업이 사라지면 승인 대기 없이 곧장 다음 단계(집행)로 넘어간다
 
   const clock = focus === 'quota' ? q : i;
   const { t, playing, speed, setSpeed, toggle, seek, play } = clock;
@@ -159,6 +160,7 @@ export default function AgentConsole() {
             title={focus === 'quota' ? 'Agent 1 — 트래픽 기반 동적 자원 효율화' : 'Agent 2 — 이상 탐지 및 대응'}
             subtitle={focus === 'quota' ? '예방적 · 트리거 쿼터 80%' : '사후적 · 트리거 이상탐지 알람'}
             steps={laneSteps}
+            t={t}
             chain={chain}
             verdict={
               focus === 'quota'

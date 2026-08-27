@@ -2,17 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { MODEL_LABEL } from '../../lib/mockRun';
 import { TENANTS } from '../../lib/tenants';
 import { FIXED_H } from './ObservePanel';
-import type { AgentStep, Executor, Phase, TenantKey } from '../../lib/types';
+import type { AgentStep, Executor, TenantKey } from '../../lib/types';
 
 const EXEC_LABEL: Record<Executor, string> = { llm: 'LLM', code: '코드 판정', exec: '실행' };
 const EXEC_STYLE: Record<Executor, { bg: string; fg: string }> = {
   llm: { bg: 'rgba(144,133,233,.16)', fg: '#9085e9' },
   code: { bg: 'rgba(255,255,255,.07)', fg: 'var(--ink-3)' },
   exec: { bg: 'rgba(217,89,38,.16)', fg: '#d95926' },
-};
-const PHASE_LABEL: Record<Phase, string> = {
-  detect: '탐지', triage: '트리아지', preprocess: '전처리', collect: '데이터 수집',
-  diagnose: '진단', act: '조치', cooldown: '쿨다운', done: '종료',
 };
 
 function Badge({ executor }: { executor: Executor }) {
@@ -25,6 +21,37 @@ function Badge({ executor }: { executor: Executor }) {
 }
 
 const box = { background: 'var(--surface-2)', border: '1px solid var(--hair)', borderRadius: 10.8, padding: '12px 14.4px' };
+
+/** 제목 중 특정 구간만 빨간 글씨로 강조한다 (i-json 제목의 '라이브 커머스' · '공용 풀 소진') */
+function HighlightedTitle({ text, marks }: { text: string; marks: string[] }) {
+  const escaped = marks.map((m) => m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const re = new RegExp(`(${escaped.join('|')})`, 'g');
+  const parts = text.split(re);
+  return (
+    <>
+      {parts.map((part, i) => (
+        marks.includes(part)
+          ? <span key={i} style={{ color: '#d03b3b' }}>{part}</span>
+          : <span key={i}>{part}</span>
+      ))}
+    </>
+  );
+}
+
+/** i-catalog 제목 옆에 총 개수 · 환산 규칙을 작은 회색 글씨로 이어 붙인다 */
+function CatalogTitle({ title, payload }: { title: string; payload: unknown }) {
+  const d = (payload ?? {}) as { catalog?: { ids: string[] }[] };
+  const total = Array.isArray(d.catalog) ? d.catalog.reduce((a, r) => a + r.ids.length, 0) : 0;
+  return (
+    <>
+      {title}
+      <span>({total}개)</span>
+      <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--ink-3)', marginLeft: 7.2 }}>
+        조치 1개 = 런북 1개 = 리소스 1개
+      </span>
+    </>
+  );
+}
 
 /** 노드풀 격리 — 처음엔 공용 풀 안에 같이 있다가, 잠깐 뜸을 들인 뒤 대한통운만 아래로 뿅 떨어져 나간다 */
 function NodepoolSplitViz({ split }: { split: { tenant: TenantKey; shared: TenantKey[] } }) {
@@ -179,7 +206,7 @@ function PoolOccupancyChart({ data }: { data: { series: number[]; target: number
 }
 
 /* payload 모양에 따라 알아서 그린다 — 실제 에이전트 출력이 바뀌면 여기만 손보면 된다 */
-function Payload({ data, stepId }: { data: unknown; stepId?: string }) {
+function Payload({ data, stepId, stepT, now }: { data: unknown; stepId?: string; stepT?: number; now?: number }) {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
 
@@ -192,20 +219,18 @@ function Payload({ data, stepId }: { data: unknown; stepId?: string }) {
   }
 
   if (Array.isArray(d.lines)) {
-    // '수집 소스 스캔'(i-collect) 카드는 다른 단계가 접혀 아래가 비므로, 텍스트는 그대로 두고 박스만 크게 키운다
-    const big = stepId === 'i-collect';
+    const isExec = stepId === 'i-exec';
     return (
       <>
         <div
           className="mono"
           style={{
             ...box,
-            fontSize: big ? 18.5 : 13.8,
+            fontSize: isExec ? 17 : 13.8,
             color: 'var(--ink-2)',
-            lineHeight: big ? 2.3 : 1.8,
+            lineHeight: 1.8,
             marginTop: 9.6,
-            padding: big ? '26px 30px' : box.padding,
-            borderRadius: big ? 14 : box.borderRadius,
+            padding: isExec ? '14.4px 14.4px' : box.padding,
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
           }}
@@ -347,45 +372,65 @@ function Payload({ data, stepId }: { data: unknown; stepId?: string }) {
   }
 
   if (Array.isArray(d.checks)) {
+    const isVerify = stepId === 'i-verify';
+    const labelSize = isVerify ? 17.3 : 14.4;
+    const noteSize = isVerify ? 15.1 : 12.6;
+    const iconSize = isVerify ? 17.3 : 14.4;
     return (
-      <div style={{ ...box, marginTop: 9.6, display: 'flex', flexDirection: 'column', gap: 7.2 }}>
-        {(d.checks as { n: string; label: string; ok: boolean; note?: string }[]).map((c) => (
-          <div key={c.n} style={{ display: 'flex', alignItems: 'center', gap: 9.6, fontSize: 14.4 }}>
-            <svg width="14.4" height="14.4" viewBox="0 0 24 24" fill="none" stroke={c.ok ? 'var(--good)' : 'var(--crit)'} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-              <path d="m5 12.5 4.5 4.5L19 7" />
-            </svg>
-            <span style={{ color: 'var(--ink-2)', flexGrow: 1 }}>{c.n} {c.label}</span>
-            {c.note && <span className="mono" style={{ fontSize: 12.6, color: 'var(--ink-3)' }}>{c.note}</span>}
-          </div>
-        ))}
-        {d.poolChart && typeof d.poolChart === 'object'
-          ? <PoolOccupancyChart data={d.poolChart as { series: number[]; target: number; goal: number }} />
-          : null}
-        <div style={{ borderTop: '1px solid var(--hair)', paddingTop: 8.4, fontSize: 13.2, color: 'var(--ink-3)' }}>
-          {d.footer
-            ? String(d.footer)
-            : `①~④ 미충족이면 재시도 1회 → 그래도 실패하면 Slack 통보 후 종료 (현재 attempt ${String(d.attempt)})`}
+      <>
+        <div style={{ ...box, marginTop: 9.6, display: 'flex', flexDirection: 'column', gap: isVerify ? 14.4 : 7.2, padding: isVerify ? '19.2px 21.6px' : box.padding }}>
+          {(d.checks as { n: string; label: string; ok: boolean; note?: string }[]).map((c) => (
+            <div key={c.n} style={{ display: 'flex', flexDirection: 'column', gap: isVerify ? 5.4 : 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9.6, fontSize: labelSize }}>
+                <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="none" stroke={c.ok ? 'var(--good)' : 'var(--crit)'} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <path d="m5 12.5 4.5 4.5L19 7" />
+                </svg>
+                <span style={{ color: 'var(--ink-2)', flexGrow: 1 }}>{c.n} {c.label}</span>
+                {c.note && !isVerify && <span className="mono" style={{ fontSize: noteSize, color: 'var(--ink-3)' }}>{c.note}</span>}
+              </div>
+              {c.note && isVerify && (
+                <span className="mono" style={{ fontSize: noteSize, color: 'var(--ink-3)', marginLeft: iconSize + 9.6 }}>{c.note}</span>
+              )}
+            </div>
+          ))}
+          {d.poolChart && typeof d.poolChart === 'object'
+            ? <PoolOccupancyChart data={d.poolChart as { series: number[]; target: number; goal: number }} />
+            : null}
         </div>
-      </div>
+        {isVerify && (
+          <div style={{ marginTop: 9.6, fontSize: noteSize, color: 'var(--ink-3)', lineHeight: 1.7 }}>
+            · 신뢰 불가일 경우 : 재진단 1회(도구 추가 조회 지시)<br />· 2회 실패 : 사람에게 보고 후 중단
+          </div>
+        )}
+      </>
     );
   }
 
   if (typeof d.direct_cause === 'string') {
     return (
       <div style={{ ...box, marginTop: 9.6, display: 'flex', flexDirection: 'column', gap: 9.6 }}>
-        <div className="mono" style={{ fontSize: 13.8, color: 'var(--ink-2)', lineHeight: 1.85, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        <div className="mono" style={{ fontSize: 13.8, color: 'var(--ink-2)', lineHeight: 1.8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
           <div>tenant        {String(d.tenant)}   occurred_at  {String(d.occurred_at)}</div>
           <div>symptom       {String(d.symptom)}</div>
           <div>direct_cause  <span style={{ color: 'var(--ink)' }}>{String(d.direct_cause)}</span></div>
           <div>root_cause    <span style={{ color: 'var(--ink)' }}>{String(d.root_cause)}</span></div>
-          <div>tool_calls    {String(d.tool_calls)}</div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4.8, borderTop: '1px solid var(--hair)', paddingTop: 8.4 }}>
-          <div style={{ fontSize: 12.6, color: 'var(--ink-3)', letterSpacing: '.04em' }}>evidence[] — 도구 호출과 결과</div>
-          {(d.evidence as string[]).map((e) => (
-            <div key={e} className="mono" style={{ fontSize: 13.2, color: 'var(--ink-2)', wordBreak: 'break-word' }}>· {e}</div>
-          ))}
-        </div>
+      </div>
+    );
+  }
+
+  if (Array.isArray(d.groups)) {
+    // '사용한 도구' — 메트릭·로그·커넥션 풀을 동시에, 각각 대제목으로 구분해서 보여준다
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10.8, marginTop: 9.6 }}>
+        {(d.groups as { heading: string; lines: string[] }[]).map((g) => (
+          <div key={g.heading} style={box}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)', marginBottom: 7.2 }}>{g.heading}</div>
+            <div className="mono" style={{ display: 'flex', flexDirection: 'column', gap: 5, fontSize: 13.6, color: 'var(--ink-2)', lineHeight: 1.7 }}>
+              {g.lines.map((l) => <div key={l}>{l}</div>)}
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
@@ -410,31 +455,16 @@ function Payload({ data, stepId }: { data: unknown; stepId?: string }) {
   }
 
   if (Array.isArray(d.milestones) && typeof d.expected === 'string') {
-    const plan = d.plan as { id: string; name: string; param: string }[];
     return (
       <div style={{ marginTop: 9.6, display: 'flex', flexDirection: 'column', gap: 9.6 }}>
-        <div style={{ ...box, display: 'flex', flexDirection: 'column', gap: 8.4 }}>
-          <div><span style={{ fontSize: 12.6, color: 'var(--ink-3)' }}>① 예상 결과</span>
-            <div style={{ fontSize: 15, marginTop: 2.4 }}>{d.expected as string}</div></div>
-          <div style={{ borderTop: '1px solid var(--hair)', paddingTop: 8.4 }}>
-            <span style={{ fontSize: 12.6, color: 'var(--ink-3)' }}>② 마일스톤</span>
+        <div style={{ ...box, display: 'flex', flexDirection: 'column', gap: 14.4, padding: '20px 22px' }}>
+          <div><span style={{ fontSize: 17, color: 'var(--ink-3)', fontWeight: 700 }}>① 예상 결과</span>
+            <div style={{ fontSize: 17, marginTop: 5, fontWeight: 600 }}>{d.expected as string}</div></div>
+          <div style={{ borderTop: '1px solid var(--hair)', paddingTop: 12 }}>
+            <span style={{ fontSize: 17, color: 'var(--ink-3)', fontWeight: 700 }}>② 마일스톤</span>
             {(d.milestones as string[]).map((m, i) => (
-              <div key={m} style={{ fontSize: 15, marginTop: 2.4 }}>{i + 1}. {m}</div>
+              <div key={m} style={{ fontSize: 17, marginTop: 5, fontWeight: 600 }}>{i + 1}. {m}</div>
             ))}
-          </div>
-          <div style={{ borderTop: '1px solid var(--hair)', paddingTop: 8.4 }}>
-            <span style={{ fontSize: 12.6, color: 'var(--ink-3)' }}>③ 런북 조합 — 순서 · 파라미터</span>
-            {plan.map((r, i) => (
-              <div key={r.id} className="mono" style={{ fontSize: 13.8, marginTop: 3.6, display: 'flex', gap: 9.6 }}>
-                <span style={{ color: '#d95926', fontWeight: 600 }}>{i + 1}. {r.id}</span>
-                <span style={{ color: 'var(--ink)', flexGrow: 1 }}>{r.name}</span>
-                <span style={{ color: 'var(--ink-3)' }}>{r.param}</span>
-              </div>
-            ))}
-          </div>
-          <div style={{ borderTop: '1px solid var(--hair)', paddingTop: 8.4, display: 'flex' }}>
-            <span style={{ fontSize: 12.6, color: 'var(--ink-3)', flexGrow: 1 }}>④ 모니터링 시간</span>
-            <span className="mono" style={{ fontSize: 14.4 }}>{String(d.monitorSec)}초</span>
           </div>
         </div>
       </div>
@@ -442,27 +472,55 @@ function Payload({ data, stepId }: { data: unknown; stepId?: string }) {
   }
 
   if (Array.isArray(d.catalog)) {
-    const rows = d.catalog as { id: string; name: string; chosen?: boolean }[];
+    const rows = d.catalog as { ids: string[]; name: string; tag?: string; chosen?: boolean }[];
+    const cap = typeof d.catalogCap === 'number' ? d.catalogCap : 5;
+    // 그룹으로 묶인 id(예: RB-06·RB-07)도 화면에는 번호 1~13 을 하나씩 매겨 펼친다 — 1열 1~7 · 2열 8~13, 스크롤 없이 한 화면
+    const flat: { n: number; id: string; name: string; tag?: string; chosen?: boolean }[] = [];
+    rows.forEach((r) => {
+      r.ids.forEach((id) => flat.push({ n: flat.length + 1, id, name: r.name, tag: r.tag, chosen: r.chosen }));
+    });
+    const columns = [flat.slice(0, 7), flat.slice(7)];
+
+    // 고른 순서대로 하나씩 초록으로 켜지며 '조합 n/cap' 이 0 → 1 → 2 → 3 으로 따라 올라간다
+    const REVEAL_DELAYS = [1_500, 3_500, 5_500];
+    const elapsed = typeof stepT === 'number' && typeof now === 'number' ? now - stepT : Infinity;
+    const revealedCount = REVEAL_DELAYS.filter((ms) => elapsed >= ms).length;
+    let chosenSeen = 0;
+
     return (
-      <div style={{ marginTop: 9.6, display: 'flex', flexDirection: 'column', gap: 9.6 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 4.8 }}>
-          {rows.map((r) => (
-            <div
-              key={r.id}
-              className="mono"
-              style={{
-                display: 'flex', gap: 7.2, padding: '6px 9.6px', borderRadius: 7.2, fontSize: 12.6,
-                background: r.chosen ? 'rgba(217,89,38,.16)' : 'var(--surface-2)',
-                color: r.chosen ? 'var(--ink)' : 'var(--ink-3)',
-                border: r.chosen ? '1px solid #d95926' : '1px solid transparent',
-              }}
-            >
-              <span style={{ fontWeight: 600, color: r.chosen ? '#d95926' : 'var(--ink-3)' }}>{r.id}</span>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
+      <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 7.2 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 9.6, flexWrap: 'wrap' }}>
+          <span style={{ flexGrow: 1 }} />
+          <span className="mono" style={{ fontSize: 16.2, fontWeight: 700, color: revealedCount > 0 ? '#16a34a' : 'var(--ink-3)', transition: 'color .3s ease' }}>조합 {revealedCount}/{cap}</span>
+        </div>
+        <div style={{ display: 'flex', gap: 18 }}>
+          {columns.map((col, ci) => (
+            <div key={ci} style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minWidth: 0 }}>
+              {col.map((it) => {
+                const rank = it.chosen ? chosenSeen++ : -1;
+                const revealed = rank >= 0 && rank < revealedCount;
+                const on = !it.chosen ? false : revealed;
+                return (
+                  <div
+                    key={it.id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 9.6, padding: '7.2px 13.2px', borderRadius: 9.6,
+                      border: on ? '1.5px solid #16a34a' : '1px solid var(--hair)',
+                      background: on ? 'rgba(22,163,74,.14)' : 'var(--surface-2)',
+                      minWidth: 0,
+                      transition: 'background .4s ease, border-color .4s ease',
+                    }}
+                  >
+                    <span className="mono" style={{ fontSize: 12.6, fontWeight: 700, color: on ? '#16a34a' : 'var(--ink-3)', flexShrink: 0, width: 17 }}>{it.n}</span>
+                    <span className="mono" style={{ fontSize: 13.8, fontWeight: 700, color: on ? '#16a34a' : 'var(--ink-3)', flexShrink: 0 }}>{it.id}</span>
+                    <span style={{ fontSize: 14.6, color: on ? 'var(--ink)' : 'var(--ink-3)', flexGrow: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</span>
+                    {it.tag && <span style={{ fontSize: 12.2, fontStyle: 'italic', color: 'var(--ink-3)', flexShrink: 0 }}>({it.tag})</span>}
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>
-        <div style={{ fontSize: 13.2, color: 'var(--ink-3)', lineHeight: 1.7 }}>{String(d.note)}</div>
       </div>
     );
   }
@@ -515,7 +573,7 @@ function Payload({ data, stepId }: { data: unknown; stepId?: string }) {
 }
 
 export default function AgentLane({
-  title, subtitle, steps, width, empty, verdict, chain = [],
+  title, subtitle, steps, width, empty, verdict, chain = [], t,
 }: {
   title: string;
   subtitle: string;
@@ -526,14 +584,16 @@ export default function AgentLane({
   verdict?: string;
   /** 단계가 바뀌어도 남는 것 — 지금까지 확정된 사실 */
   chain?: { label: string; value: string; state: 'done' | 'now' | 'todo' }[];
+  /** 리플레이 현재 시각 — i-catalog 의 조합 선택 순차 애니메이션에 쓴다 */
+  t?: number;
 }) {
   const model = steps.find((s) => s.model)?.model;
+  // i-hitl 은 팝업(HitlPopup)에서 전부 보여주므로 로그에는 중복 표시하지 않는다 — 트리거용 데이터는 steps 에 그대로 남아있다
+  const visibleSteps = steps.filter((s) => s.id !== 'i-hitl');
   const boxRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     boxRef.current?.scrollTo({ top: boxRef.current.scrollHeight, behavior: 'smooth' });
-  }, [steps.length]);
-
-  let lastPhase: Phase | null = null;
+  }, [visibleSteps.length]);
 
   return (
     <div
@@ -593,16 +653,13 @@ export default function AgentLane({
           padding: '14.8px 20.3px 18.5px', display: 'flex', flexDirection: 'column', gap: 11.1,
         }}
       >
-      {steps.length === 0 && (
+      {visibleSteps.length === 0 && (
         <div style={{ fontSize: 15, color: 'var(--ink-3)', lineHeight: 1.7 }}>
           {empty}<span className="dots">.....</span>
         </div>
       )}
 
-      {steps.map((s, si) => {
-        const newPhase = s.phase !== lastPhase;
-        lastPhase = s.phase;
-
+      {visibleSteps.map((s, si) => {
         // 사용률 재확인 카운터 스텝 — 체크·시간 배지 없이 "(1/3)" + 그 아래 상세 내용까지 통째로 한 단위로 쌓이며 내려간다
         const counterPayload = s.payload as { counter?: number; total?: number; lines?: string[] } | undefined;
         if (typeof counterPayload?.counter === 'number' && typeof counterPayload?.total === 'number') {
@@ -621,7 +678,8 @@ export default function AgentLane({
         }
 
         // 쿨다운 헤더(q-cool)는 뒤에 모니터링 로그가 쌓여도 접히지 않고 맨 위 '메인 글'로 고정된다
-        const folded = si < steps.length - 1 && s.id !== 'q-cool';
+        // '수집 소스 스캔'(i-collect)도 접히지 않는다 — 바로 아래 '장애 등급 산출 → 프롬프트 제작' 이 뜬 뒤에도 둘 다 제목+본문 그대로 남아있어야 한다
+        const folded = si < visibleSteps.length - 1 && s.id !== 'q-cool' && s.id !== 'i-collect';
         if (folded) {
           return (
             <div key={s.id} style={{ display: 'flex', alignItems: 'baseline', gap: 9.6, opacity: 0.5, transition: 'opacity .45s ease' }}>
@@ -634,14 +692,6 @@ export default function AgentLane({
         }
         return (
           <div key={s.id} className="log-enter log-flash" style={{ padding: '3px 8px', margin: '-3px -8px', transition: 'opacity .3s ease' }}>
-            {newPhase && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 9.6, margin: '2px 12px 7.2px' }}>
-                <span style={{ fontSize: 12.6, fontWeight: 700, letterSpacing: '.08em', color: 'var(--ink-3)' }}>
-                  {PHASE_LABEL[s.phase].toUpperCase()}
-                </span>
-                <span style={{ flexGrow: 1, height: 1.2, background: 'var(--hair)' }} />
-              </div>
-            )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 9.6, flexWrap: 'wrap' }}>
               <Badge executor={s.executor} />
               <span style={{ flexGrow: 1 }} />
@@ -655,9 +705,13 @@ export default function AgentLane({
                 textOverflow: s.id === 'q-donors' ? 'ellipsis' : undefined,
               }}
             >
-              {s.title}
+              {s.id === 'i-json'
+                ? <HighlightedTitle text={s.title} marks={['라이브 커머스', '공용 풀 소진']} />
+                : s.id === 'i-catalog'
+                ? <CatalogTitle title={s.title} payload={s.payload} />
+                : s.title}
             </div>
-            <Payload data={s.payload} stepId={s.id} />
+            <Payload data={s.payload} stepId={s.id} stepT={s.t} now={t} />
             <div style={{ height: 16.8 }} />
           </div>
         );

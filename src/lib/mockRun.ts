@@ -22,7 +22,7 @@ import type { AgentStep, Projection, RunTimeline, TenantKey, TenantSample } from
 
 /** 두 에이전트는 완전히 별개 상황이다. 타임라인도 시계도 데이터도 따로 돈다. */
 const DURATION_Q = 90_000;    // Agent 1 — 추석 연휴 직후 물량 폭주
-const DURATION_I = 100_000;   // Agent 2 — 격리 후에도 남는 공유 자원 문제 (Agent 1 과 무관)
+const DURATION_I = 80_000;    // Agent 2 — 격리 후에도 남는 공유 자원 문제 (Agent 1 과 무관)
 
 /** ⚠️ 실제 쓰는 Bedrock 모델 ID 로 교체할 것 */
 export const MODEL_ID = 'anthropic.claude-sonnet-4-20250514-v1:0';
@@ -177,24 +177,24 @@ function buildSamples(
 function onstyleQps(t: number): number {
   if (t < 2_000) return BASE_QPS.cgv;
   if (t < 27_000) return lerp(BASE_QPS.cgv, 940, (t - 2_000) / 25_000);
-  if (t < 68_000) return 940;
-  if (t < 86_000) return lerp(940, 420, (t - 68_000) / 18_000);
+  if (t < 65_000) return 940;
+  if (t < 83_000) return lerp(940, 420, (t - 65_000) / 18_000);
   return 380;
 }
 /** CJ 온스타일 — 적립 P99. 동적 베이스라인(168/182ms)은 방송 시작 2.6초 만에, 정적 임계값(500ms)은 6초 만에 넘는다 */
 function onstyleP99(t: number): number {
   if (t < 2_000) return BASE_P99.cgv;
   if (t < 27_000) return lerp(BASE_P99.cgv, 2_400, (t - 2_000) / 25_000);
-  if (t < 68_000) return 2_400;
-  if (t < 86_000) return lerp(2_400, 175, (t - 68_000) / 18_000);
+  if (t < 65_000) return 2_400;
+  if (t < 83_000) return lerp(2_400, 175, (t - 65_000) / 18_000);
   return 168;
 }
 /** 같은 RDS Proxy 를 쓰는 나머지 테넌트 — 콜래터럴 지연. base → peak → base 로 되돌아온다 */
 function collateralP99(base: number, peak: number, t: number): number {
   if (t < 5_000) return base;
   if (t < 30_000) return lerp(base, peak, (t - 5_000) / 25_000);
-  if (t < 68_000) return peak;
-  if (t < 86_000) return lerp(peak, base + 12, (t - 68_000) / 18_000);
+  if (t < 65_000) return peak;
+  if (t < 83_000) return lerp(peak, base + 12, (t - 65_000) / 18_000);
   return base + 8;
 }
 /** 대한통운 — 이미 격리된 노드풀에서 안정 운영 중이지만, 밀린 적립 쓰기가 공용 풀을 계속 누른다 */
@@ -206,17 +206,17 @@ function vipsP99(t: number): number { return collateralP99(BASE_P99.vips, 1_120,
 function incidentLeading(t: number) {
   const connPoolPct = t < 5_000 ? 60
     : t < 35_000 ? lerp(60, 97, (t - 5_000) / 30_000)
-    : t < 68_000 ? 97
-    : lerp(97, 58, (t - 68_000) / 18_000);
+    : t < 65_000 ? 97
+    : lerp(97, 58, (t - 65_000) / 18_000);
   const threadQueue = t < 5_000 ? 40
     : t < 35_000 ? lerp(40, 340, (t - 5_000) / 30_000)
-    : t < 68_000 ? 340
-    : lerp(340, 45, (t - 68_000) / 18_000);
+    : t < 65_000 ? 340
+    : lerp(340, 45, (t - 65_000) / 18_000);
   const connWaitSlope = Number((t < 5_000 ? 0.4
     : t < 35_000 ? lerp(0.4, 9.1, (t - 5_000) / 30_000)
-    : t < 68_000 ? 9.1
-    : lerp(9.1, 0.6, (t - 68_000) / 18_000)).toFixed(1));
-  const hpaReplicas = t < 10_000 ? 6 : t < 27_000 ? 10 : t < 68_000 ? 10 : 7;
+    : t < 65_000 ? 9.1
+    : lerp(9.1, 0.6, (t - 65_000) / 18_000)).toFixed(1));
+  const hpaReplicas = t < 10_000 ? 6 : t < 27_000 ? 10 : t < 65_000 ? 10 : 7;
   return { connPoolPct: Math.round(connPoolPct), threadQueue: Math.round(threadQueue), connWaitSlope, hpaReplicas };
 }
 
@@ -442,7 +442,7 @@ const INCIDENT_STEPS: AgentStep[] = [
     },
   },
   {
-    id: 'i-collect', t: 16_000, agent: 'incident', phase: 'collect',
+    id: 'i-collect', t: 8_000, agent: 'incident', phase: 'collect',
     state: '전처리 Lambda · 데이터 수집', executor: 'code',
     title: '수집 소스 스캔',
     payload: {
@@ -454,94 +454,92 @@ const INCIDENT_STEPS: AgentStep[] = [
     },
   },
   {
-    id: 'i-prompt', t: 19_000, agent: 'incident', phase: 'collect',
-    state: '전처리 Lambda · 프롬프트 제작', executor: 'code',
-    title: '정형 템플릿',
-    detail: '왜 Step Functions 가 아니라 Lambda 하나인가 — 정규화→중복체크→수집→프롬프트는 분기 없는 직렬 작업이다. SFN 은 단계 사이에만 있다.',
-    payload: { lines: ['[정규화된 트리거] + [수집 데이터] + [출력 스키마 지시]'] },
-  },
-  {
-    id: 'i-tool-metric', t: 24_000, agent: 'incident', phase: 'diagnose',
-    state: '진단 에이전트 (Bedrock) · 도구 1/3', executor: 'llm',
-    model: MODEL_ID, tokens: { in: 4_100, out: 320 },
-    title: '생각 중 · 사용한 도구 — 메트릭',
-    detail: '정해진 원인 목록 없이 자유 도출한다. 먼저 무엇이 늘었는지부터 본다.',
+    // '수집 소스 스캔' 바로 다음 순간 곧바로 뜬다 — 로그 칸에 빈 공간을 남기지 않는다
+    id: 'i-prompt', t: 8_100, agent: 'incident', phase: 'collect',
+    state: '전처리 Lambda · 장애 등급 산출', executor: 'code',
+    title: '장애 등급 산출 → 프롬프트 제작',
     payload: {
       lines: [
-        'AMP         cjonstyle(온스타일) 적립 RPS 360 → 940  (+161%)',
-        'CloudWatch  공용 RDS Proxy 커넥션 풀 사용률 60% → 97%',
-        'HPA         레플리카 6 → 10 (설정 상한까지 이미 자동 확장 — 더 늘리려면 상한 자체를 올려야 한다)',
+        '[정규화 트리거] + [수집 데이터] + [장애 등급] + [출력 스키마]',
+        '',
+        'G1 지연        P99 > SLO(1.0s) · 에러율 정상',
+        'G2 부분 실패   에러율 1~10% 또는 일부 테넌트',
+        'G3 전면 중단   에러율 > 10% · 전 테넌트',
+        '',
+        '이번 케이스 → G1 · P99 2.4s (SLO 240% 초과) · 에러율 정상 — 지연이지 장애는 아니다',
       ],
     },
   },
   {
-    id: 'i-tool-log', t: 28_000, agent: 'incident', phase: 'diagnose',
-    state: '진단 에이전트 (Bedrock) · 도구 2/3', executor: 'llm',
-    model: MODEL_ID, tokens: { in: 5_400, out: 410 },
-    title: '생각 중 · 사용한 도구 — 로그',
-    detail: '커넥션이 왜 안 풀리는지, 뭐가 오래 붙잡고 있는지 확인한다.',
+    id: 'i-tool-metric', t: 13_500, agent: 'incident', phase: 'diagnose',
+    state: '진단 에이전트 (Bedrock) · 도구 호출', executor: 'llm',
+    model: MODEL_ID, tokens: { in: 13_200, out: 990 },
+    title: '사용한 도구',
+    detail: '정해진 원인 목록 없이 자유 도출한다. 메트릭 · 로그 · 커넥션 풀 상태를 동시에 확인한다.',
     payload: {
-      lines: [
-        'Loki   슬로우 쿼리 로그 340건 · 평균 실행 22초',
-        'Loki   대표 쿼리 "point_ledger 적립 집계 GROUP BY member_id"',
-        'Loki   "connection pool exhausted" 128건',
+      groups: [
+        {
+          heading: '메트릭',
+          lines: [
+            'AMP         cjonstyle(온스타일) 적립 RPS 360 → 940  (+161%)',
+            'CloudWatch  공용 RDS Proxy 커넥션 풀 사용률 60% → 97%',
+            'HPA         레플리카 6 → 10 (설정 상한까지 이미 자동 확장 — 더 늘리려면 상한 자체를 올려야 한다)',
+          ],
+        },
+        {
+          heading: '로그',
+          lines: [
+            'Loki   슬로우 쿼리 로그 340건 · 평균 실행 22초',
+            'Loki   대표 쿼리 "point_ledger 적립 집계 GROUP BY member_id"',
+            'Loki   "connection pool exhausted" 128건',
+          ],
+        },
+        {
+          heading: '커넥션 풀',
+          lines: [
+            'RDS Proxy   max_connections 400 · 사용 388 · 대기 340',
+            '대기 시간   평균 4.8초 · 최대 12.1초',
+          ],
+        },
       ],
     },
   },
   {
-    id: 'i-tool-pool', t: 32_000, agent: 'incident', phase: 'diagnose',
-    state: '진단 에이전트 (Bedrock) · 도구 3/3', executor: 'llm',
-    model: MODEL_ID, tokens: { in: 3_700, out: 260 },
-    title: '생각 중 · 사용한 도구 — 커넥션 풀 상태',
-    detail: '풀 자체의 여유가 얼마나 남았는지 마지막으로 본다.',
-    payload: {
-      lines: [
-        'RDS Proxy   max_connections 400 · 사용 388 · 대기 340',
-        '대기 시간   평균 4.8초 · 최대 12.1초',
-        '연결 대상   cgv · cjenm · oliveyoung · vips — 전부 같은 풀',
-      ],
-    },
-  },
-  {
-    id: 'i-json', t: 35_000, agent: 'incident', phase: 'diagnose',
+    id: 'i-json', t: 20_500, agent: 'incident', phase: 'diagnose',
     state: '출력 JSON (스키마 고정)', executor: 'llm',
-    title: 'CJ 온스타일 라이브 커머스로 적립 쓰기가 몰리며 공용 RDS Proxy 풀이 소진 — 원인은 하나가 아니다',
+    title: '원인 도출 : CJ ONSTYLE 라이브 커머스로 적립 요청 공용 풀 소진',
     payload: {
       tenant: 'cgv',
       occurred_at: '10:09:04',
       symptom: '포인트 적립 P99 2.4s · SLO(1.0s) 대비 240%',
       direct_cause: '공용 RDS Proxy 커넥션 풀 97% 점유 · 대기 커넥션 340건',
-      root_cause: '적립 집계 쿼리가 평균 22초간 커넥션을 붙잡은 상태에서, 온스타일 방송으로 쓰기 요청이 급증해 대기 큐가 길어지고 처리량 자체가 부족해진 복합 원인',
-      tool_calls: '3회 · 3종',
-      evidence: [
-        '메트릭       적립 RPS 360 → 940 (온스타일) · 풀 사용률 60% → 97%',
-        '로그         적립 집계 쿼리 평균 실행 22초 · 슬로우 쿼리 340건',
-        '커넥션 풀    max_connections 400 · 사용 388 · 대기 340',
-      ],
+      root_cause: '적립 집계 쿼리가 평균 22초간 커넥션 점유 상태, 라이브로 쓰기 요청이 급증해 대기 큐 증가 및 처리량 부족',
     },
   },
   {
-    id: 'i-verify', t: 38_000, agent: 'incident', phase: 'diagnose',
+    id: 'i-verify', t: 27_500, agent: 'incident', phase: 'diagnose',
     state: '검증 Lambda (결정론)', executor: 'code',
-    title: '신뢰도는 모델에게 묻지 않는다',
+    title: '검증(결정론)',
     detail: '평가받을 대상에게 몇 점 같냐고 묻지 않는다. 신뢰도는 도구 호출 기록이라는 사실로 계산한다.',
     payload: {
       checks: [
         { n: '①', label: 'JSON 스키마 검사', ok: true },
-        { n: '②', label: '정당한 추론인가 — 도구 호출 횟수 · 종류로 신뢰도 산출', ok: true, note: '3회 · 3종 → 0.78' },
+        { n: '②', label: '신뢰도 = 호출수/4 ×0.4 + 종류/3 ×0.3 + evidence 근거율 ×0.3', ok: true, note: '3/4×0.4 + 3/3×0.3 + 0.6×0.3 = 0.78' },
+        { n: '③', label: '신뢰도 ≥ 0.5 ?', ok: true, note: '0.78 ≥ 0.5 → 통과' },
       ],
       footer: 'LLM 자가 confidence 는 쓰지 않는다. 신뢰 불가면 재진단 1회(도구 추가 조회 지시), 2회 실패면 사람에게 보고하고 중단한다.',
     },
   },
   {
-    id: 'i-plan', t: 46_000, agent: 'incident', phase: 'act',
+    id: 'i-plan', t: 34_500, agent: 'incident', phase: 'act',
     state: '조치 에이전트 (Bedrock)', executor: 'llm',
     model: MODEL_ID, tokens: { in: 7_200, out: 820 },
-    title: '이 원인을 없애려면 무엇을 해야 하는가',
+    title: '원인(처리 병목) 해결 방법',
     detail: '스로틀(RB-03)은 수요 자체를 깎는다. 원인이 수요가 아니라 처리 쪽 병목이라 배제하고, 풀을 넓히고 여유를 늘리는 조합을 택했다.',
     payload: {
       expected: 'P99 1.0s 이내 · 공용 풀 사용률 65% 이하',
       milestones: ['4분 내 대기 커넥션 50건 이하', '7분 내 P99 SLO 이내 회복'],
+      // HitlPopup 이 이 필드들을 그대로 읽어 쓴다 — 로그(오른쪽)에서는 ①②만 보여주고 이 둘은 렌더링하지 않을 뿐, 데이터는 지우면 안 된다
       plan: [
         { id: 'RB-04', name: 'RDS Proxy 커넥션 풀 조정', param: 'max_connections 400 → 640' },
         { id: 'RB-05', name: '슬로우 쿼리 세션 종료', param: '실행 20초 초과 세션' },
@@ -551,25 +549,29 @@ const INCIDENT_STEPS: AgentStep[] = [
     },
   },
   {
-    id: 'i-catalog', t: 52_000, agent: 'incident', phase: 'act',
+    id: 'i-catalog', t: 41_000, agent: 'incident', phase: 'act',
     state: '카탈로그 조합으로 답이 나오나', executor: 'code',
-    title: '런북 카탈로그 13개 — 조합 상한 5개 · 이번엔 3개만',
+    title: '기존 런북 카탈로그에서 매칭',
     detail: '런북이 리소스 두 개를 만지면 권한도 둘 다 열린다. 최소 권한을 지키려면 쪼개고, 필요한 만큼만 조합한다 — 상한은 5개지만 이번엔 3개로 충분하다.',
     payload: {
       catalog: [
-        { id: 'RB-01', name: 'HPA 레플리카 상향', chosen: true }, { id: 'RB-02', name: '파드 롤링 재시작' },
-        { id: 'RB-03', name: '테넌트 RPS 스로틀' }, { id: 'RB-04', name: 'RDS Proxy 커넥션 풀 조정', chosen: true },
-        { id: 'RB-05', name: '슬로우 쿼리 세션 종료', chosen: true }, { id: 'RB-06', name: '노드풀 격리' },
-        { id: 'RB-07', name: '노드 cordon' }, { id: 'RB-08', name: 'ArgoCD 롤백' },
-        { id: 'RB-09', name: 'limit 상향' }, { id: 'RB-10', name: 'RLS Redis 재시작' },
-        { id: 'RB-11', name: '테넌트 통보' }, { id: 'RB-12', name: '쿼터 핸드오프' },
-        { id: 'RB-13', name: '무조치 · 에스컬레이션' },
+        { ids: ['RB-01'], name: 'HPA 레플리카 상향', tag: 'k8s', chosen: true },
+        { ids: ['RB-02'], name: '파드 롤링 재시작', tag: 'k8s' },
+        { ids: ['RB-03'], name: '테넌트 RPS 스로틀', tag: 'ratelimit' },
+        { ids: ['RB-04'], name: 'RDS Proxy 커넥션 풀', tag: 'rds', chosen: true },
+        { ids: ['RB-05'], name: '슬로우 쿼리 종료', tag: '집행경로 없음', chosen: true },
+        { ids: ['RB-06', 'RB-07'], name: '노드풀 격리 · 노드 cordon' },
+        { ids: ['RB-08', 'RB-09'], name: 'ArgoCD 롤백 · limit 상향' },
+        { ids: ['RB-10'], name: 'RLS Redis 재시작', tag: 'k8s' },
+        { ids: ['RB-11', 'RB-12'], name: '테넌트 통보 · 쿼터 핸드오프' },
+        { ids: ['RB-13'], name: '무조치 · 에스컬레이션', tag: 'notify' },
       ],
+      catalogCap: 5,
       note: '미매칭이었다면 런북 직접 제작 → 무조건 T3 (HITL + 보고서). 승인·실행되면 카탈로그에 적립해 다음엔 조합 경로로 처리한다.',
     },
   },
   {
-    id: 'i-tier', t: 56_000, agent: 'incident', phase: 'act',
+    id: 'i-tier', t: 50_500, agent: 'incident', phase: 'act',
     state: '티어 판정 (AI)', executor: 'llm',
     model: MODEL_ID, tokens: { in: 2_200, out: 170 },
     title: 'T2 — HITL',
@@ -583,7 +585,7 @@ const INCIDENT_STEPS: AgentStep[] = [
     },
   },
   {
-    id: 'i-hitl', t: 62_000, agent: 'incident', phase: 'act',
+    id: 'i-hitl', t: 53_000, agent: 'incident', phase: 'act',
     state: 'HITL — Slack 승인', executor: 'code',
     title: 'HITL — Slack 승인 대기',
     detail: '완전 자동화가 목표가 아니다. 승인 버튼을 누를 수 있는 상태까지 자동으로 만드는 게 범위다.',
@@ -595,20 +597,22 @@ const INCIDENT_STEPS: AgentStep[] = [
     },
   },
   {
-    id: 'i-exec', t: 68_000, agent: 'incident', phase: 'act',
+    id: 'i-exec', t: 58_000, agent: 'incident', phase: 'act',
     state: '런북 executor Lambda', executor: 'exec',
-    title: 'EKS · Aurora 집행 — 가드레일은 롤백이 아니라 사전 수립',
+    title: 'EKS · Aurora 집행',
     detail: '서비스 최소 가용 구간은 AI 불가침. Kyverno 정책이 executor 보다 먼저 막는다.',
     payload: {
       lines: [
         '권한 분리       IAM · K8s RBAC (런북별 최소 권한)',
         'Kyverno 사전 가드레일   통과',
-        '집행            RB-04 풀 상향 → RB-05 슬로우 쿼리 세션 종료 → RB-01 HPA 레플리카 상향',
+        '집행 ① RB-04   RDS Proxy 커넥션 풀 max_connections 400 → 640',
+        '집행 ② RB-05   슬로우 쿼리 세션(실행 20초 초과) 강제 종료',
+        '집행 ③ RB-01   HPA 레플리카 6 → 12',
       ],
     },
   },
   {
-    id: 'i-watch', t: 78_000, agent: 'incident', phase: 'cooldown',
+    id: 'i-watch', t: 65_000, agent: 'incident', phase: 'cooldown',
     state: '모니터링 Lambda · 600초', executor: 'code',
     title: '마일스톤 순서대로 확인',
     payload: {
@@ -622,7 +626,7 @@ const INCIDENT_STEPS: AgentStep[] = [
     },
   },
   {
-    id: 'i-record', t: 90_000, agent: 'incident', phase: 'done',
+    id: 'i-record', t: 77_000, agent: 'incident', phase: 'done',
     state: '종료 · DynamoDB 이력 기록', executor: 'code',
     title: '장애 · 조치 이력 저장 · Slack 보고',
     payload: { lines: ['DynamoDB 장애·조치 이력 기록', 'Slack 보고 — T1 자동 실행 건도 사후 보고 대상'] },
