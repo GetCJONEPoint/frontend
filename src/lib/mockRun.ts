@@ -674,13 +674,68 @@ const INCIDENT_STEPS: AgentStep[] = [
     },
   },
   {
-    id: 'i-watch', t: 65_000, agent: 'incident', phase: 'cooldown',
+    /* 집행 직후 — 설계상 step=monitor 노드. 조치가 먹었는지를 사람이 보지 않고 결정론으로 되묻는 구간이라
+       "무엇을 · 어떻게 · 언제까지 재는가"를 먼저 밝히고, 아래로 평가 회차가 쌓인다. */
+    id: 'i-cool', t: 63_000, agent: 'incident', phase: 'cooldown',
+    state: '모니터링 Lambda · step=monitor', executor: 'code',
+    title: '쿨다운 모니터링 시작',
+    detail: '조치가 먹었는지는 사람이 판단하지 않는다. 예상 결과를 checks 로 바꿔 30초마다 결정론으로 평가한다.',
+    payload: {
+      lines: [
+        '평가 주기     30초 간격 반복 · 최대 600초 (monitor_seconds)',
+        '평가 방법     checks 를 PromQL · EKS API 로 조회해 판정 — LLM 개입 없음',
+        '예상 결과     P99 1.0s 이내 · 공용 풀 사용률 65% 이하',
+        '만료 처리     monitor_seconds 까지 미도달이면 만료 → 재진단 1회 · 2회째면 사람 에스컬레이션',
+      ],
+    },
+  },
+  /* 예상 결과 도달? 게이트 — 미도달이면 30초 뒤 다시 잰다. 도달할 때까지 반복하는 이 루프가
+     화면에 없으면 "한 번 보고 끝났다"로 보인다. 회차는 600초/30초 = 최대 20회 중 발췌다. */
+  {
+    id: 'i-mon-1', t: 65_000, agent: 'incident', phase: 'cooldown',
+    state: 'monitor · checks 평가', executor: 'code',
+    title: '결과 도달 확인',
+    payload: {
+      counter: 1, total: 20, heading: '결과 도달 확인',
+      lines: [
+        '+30s    대기 커넥션 118건  ·  적립 P99 2,050ms  ·  풀 사용률 94%',
+        '판정    예상 결과 미도달 → 30초 후 재확인',
+      ],
+    },
+  },
+  {
+    id: 'i-mon-2', t: 67_500, agent: 'incident', phase: 'cooldown',
+    state: 'monitor · checks 평가', executor: 'code',
+    title: '결과 도달 확인',
+    payload: {
+      counter: 3, total: 20, heading: '결과 도달 확인',
+      lines: [
+        '+90s    대기 커넥션 74건  ·  적립 P99 1,510ms  ·  풀 사용률 81%',
+        '판정    예상 결과 미도달 → 30초 후 재확인',
+      ],
+    },
+  },
+  {
+    id: 'i-mon-3', t: 70_000, agent: 'incident', phase: 'cooldown',
+    state: 'monitor · checks 평가', executor: 'code',
+    title: '결과 도달 확인',
+    payload: {
+      counter: 7, total: 20, heading: '결과 도달 확인',
+      lines: [
+        '+210s   대기 커넥션 38건  ·  적립 P99 1,090ms  ·  풀 사용률 67%',
+        '판정    M1 도달 · M2 미도달 → 30초 후 재확인',
+      ],
+    },
+  },
+  {
+    id: 'i-watch', t: 72_500, agent: 'incident', phase: 'cooldown',
     state: '모니터링 Lambda · 600초', executor: 'code',
     title: '마일스톤 순서대로 확인',
     payload: {
       checks: [
         { n: 'M1', label: '4분 내 대기 커넥션 50건 이하', ok: true, note: '+210s · 38건' },
-        { n: 'M2', label: '7분 내 P99 SLO(1.0s) 이내', ok: true, note: '+260s · 620ms' },
+        // 30초 간격 평가라 마일스톤 도달 시각도 30초 격자 위에 떨어진다 (9회차)
+        { n: 'M2', label: '7분 내 P99 SLO(1.0s) 이내', ok: true, note: '+270s · 620ms' },
         { n: '결과', label: '예상 결과 도달 — P99 1.0s 이내 · 풀 62% 이하', ok: true },
       ],
       poolChart: { series: [97, 92, 87, 81, 76, 71, 67, 63, 61, 59, 58], target: 90, goal: 62 },

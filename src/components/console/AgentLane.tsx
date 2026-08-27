@@ -661,12 +661,13 @@ export default function AgentLane({
 
       {visibleSteps.map((s, si) => {
         // 사용률 재확인 카운터 스텝 — 체크·시간 배지 없이 "(1/3)" + 그 아래 상세 내용까지 통째로 한 단위로 쌓이며 내려간다
-        const counterPayload = s.payload as { counter?: number; total?: number; lines?: string[] } | undefined;
+        const counterPayload = s.payload as { counter?: number; total?: number; lines?: string[]; heading?: string } | undefined;
         if (typeof counterPayload?.counter === 'number' && typeof counterPayload?.total === 'number') {
           return (
             <div key={s.id} className="log-enter">
               <div style={{ fontSize: 16.5, fontWeight: 600, color: 'var(--ink-2)' }}>
-                사용률 재확인 ({counterPayload.counter}/{counterPayload.total})
+                {/* heading 이 없으면 Agent 1 의 사용률 재확인 — 에이전트마다 반복해서 재는 대상이 다르다 */}
+                {counterPayload.heading ?? '사용률 재확인'} ({counterPayload.counter}/{counterPayload.total})
               </div>
               {Array.isArray(counterPayload.lines) && (
                 <div className="mono" style={{ ...box, fontSize: 13.8, color: 'var(--ink-2)', lineHeight: 1.8, marginTop: 7.2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
