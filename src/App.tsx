@@ -1,5 +1,6 @@
 import PosTerminal from './views/PosTerminal';
 import AgentConsole from './views/AgentConsole';
+import LiveObserve from './views/LiveObserve';
 import Launcher from './views/Launcher';
 import { isTenantKey } from './lib/tenants';
 
@@ -13,5 +14,6 @@ export default function App() {
     return <PosTerminal tenant={tenant} />;
   }
   if (view === 'console') return <AgentConsole />;
+  if (view === 'live') return <LiveObserve />;
   return <Launcher />;
 }

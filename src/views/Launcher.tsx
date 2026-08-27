@@ -46,6 +46,17 @@ export default function Launcher() {
         <button
           className="card"
           style={{ padding: '16px 20px', textAlign: 'left', minWidth: 260 }}
+          onClick={() => open('/?view=live', 1400, 900)}
+        >
+          <div style={{ fontWeight: 600, fontSize: 15 }}>실시간 지표</div>
+          <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 5 }}>
+            RED(요청량·지연시간) + Bedrock 사용량 · 10초 주기
+          </div>
+        </button>
+
+        <button
+          className="card"
+          style={{ padding: '16px 20px', textAlign: 'left', minWidth: 260 }}
           onClick={() => open('/?view=pos&tenant=cgv', 1290, 850)}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
