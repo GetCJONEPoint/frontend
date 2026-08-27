@@ -587,7 +587,7 @@ const INCIDENT_STEPS: AgentStep[] = [
       checks: [
         { n: '①', label: 'JSON 스키마 검사', ok: true },
         { n: '②', label: '신뢰도 = 호출수/4 ×0.4 + 종류/3 ×0.3 + evidence 근거율 ×0.3', ok: true, note: '3/4×0.4 + 3/3×0.3 + 0.6×0.3 = 0.78' },
-        { n: '③', label: '신뢰도 ≥ 0.5 ?', ok: true, note: '0.78 ≥ 0.5 → 통과' },
+        { n: '③', label: '신뢰도 ≥ 0.5', ok: true, note: '0.78 ≥ 0.5 → 통과' },
       ],
       footer: 'LLM 자가 confidence 는 쓰지 않는다. 신뢰 불가면 재진단 1회(도구 추가 조회 지시), 2회 실패면 사람에게 보고하고 중단한다.',
     },
