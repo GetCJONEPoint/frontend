@@ -179,7 +179,7 @@ function PoolOccupancyChart({ data }: { data: { series: number[]; target: number
 }
 
 /* payload 모양에 따라 알아서 그린다 — 실제 에이전트 출력이 바뀌면 여기만 손보면 된다 */
-function Payload({ data }: { data: unknown }) {
+function Payload({ data, stepId }: { data: unknown; stepId?: string }) {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
 
@@ -192,9 +192,24 @@ function Payload({ data }: { data: unknown }) {
   }
 
   if (Array.isArray(d.lines)) {
+    // '수집 소스 스캔'(i-collect) 카드는 다른 단계가 접혀 아래가 비므로, 텍스트는 그대로 두고 박스만 크게 키운다
+    const big = stepId === 'i-collect';
     return (
       <>
-        <div className="mono" style={{ ...box, fontSize: 13.8, color: 'var(--ink-2)', lineHeight: 1.8, marginTop: 9.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        <div
+          className="mono"
+          style={{
+            ...box,
+            fontSize: big ? 18.5 : 13.8,
+            color: 'var(--ink-2)',
+            lineHeight: big ? 2.3 : 1.8,
+            marginTop: 9.6,
+            padding: big ? '26px 30px' : box.padding,
+            borderRadius: big ? 14 : box.borderRadius,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}
+        >
           {(d.lines as string[]).map((l) => <div key={l}>{l}</div>)}
         </div>
         {!!d.nodepoolSplit && (
@@ -642,7 +657,7 @@ export default function AgentLane({
             >
               {s.title}
             </div>
-            <Payload data={s.payload} />
+            <Payload data={s.payload} stepId={s.id} />
             <div style={{ height: 16.8 }} />
           </div>
         );

@@ -263,9 +263,9 @@ function SummaryCard({ agent, usage, durationMs }: { agent: AgentId; usage: { in
 
 /* ── 데이터 수집 (Agent 2) — ArgoCD·비즈니스 이벤트·Loki·프롬프트 제작을 진행형 단계로 크게 ── */
 const COLLECT_STEPS: { k: string; v: string; tone: 'dim' | 'warn' | 'crit' }[] = [
-  { k: 'ArgoCD', v: '최근 배포 없음 · 마지막 6h 전', tone: 'dim' },
-  { k: '비즈니스 이벤트', v: 'CJ 온스타일 라이브 커머스 방송 시작 10:02', tone: 'warn' },
-  { k: 'Loki', v: '최근 5분 ERROR 612건 · "connection pool exhausted" 외 3개', tone: 'crit' },
+  { k: 'ArgoCD', v: '최근 배포 없음', tone: 'dim' },
+  { k: 'DynamoDB', v: '비즈니스 이벤트CJ 온스타일 라이브 커머스 방송', tone: 'warn' },
+  { k: 'Loki', v: '최근 5분 ERROR 612건', tone: 'crit' },
   { k: '프롬프트 제작', v: '정형 템플릿 + 장애 등급 G1~G3', tone: 'dim' },
 ];
 
