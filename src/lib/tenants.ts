@@ -85,7 +85,7 @@ export const TENANTS: Record<TenantKey, TenantMeta> = {
     grade: 'VIP',
     color: 'var(--t-oliveyoung)',
     brandColor: '#1BAF7A',
-    logo: '/olive_logo.png',
+    logo: '/oliveyoung_logo.png',
     baselineRps: 480,
     menu: [
       { id: 'ampoule', name: '[1등미백앰플] 메디큐브 PDRN 핑크 펩타이드 앰플 30ml 리필기획(+리필팩50ml+거울키링)', price: 24600 },

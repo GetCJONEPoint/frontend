@@ -1,6 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MODEL_LABEL } from '../../lib/mockRun';
-import type { AgentStep, Executor, Phase } from '../../lib/types';
+import { TENANTS } from '../../lib/tenants';
+import { FIXED_H } from './ObservePanel';
+import type { AgentStep, Executor, Phase, TenantKey } from '../../lib/types';
 
 const EXEC_LABEL: Record<Executor, string> = { llm: 'LLM', code: '코드 판정', exec: '실행' };
 const EXEC_STYLE: Record<Executor, { bg: string; fg: string }> = {
@@ -24,16 +26,181 @@ function Badge({ executor }: { executor: Executor }) {
 
 const box = { background: 'var(--surface-2)', border: '1px solid var(--hair)', borderRadius: 10.8, padding: '12px 14.4px' };
 
+/** 노드풀 격리 — 처음엔 공용 풀 안에 같이 있다가, 잠깐 뜸을 들인 뒤 대한통운만 아래로 뿅 떨어져 나간다 */
+function NodepoolSplitViz({ split }: { split: { tenant: TenantKey; shared: TenantKey[] } }) {
+  const iso = TENANTS[split.tenant];
+  const [moved, setMoved] = useState(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setMoved(true), 1_500);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  return (
+    <div style={{ marginTop: 9.6, display: 'flex', flexDirection: 'column', gap: 11 }}>
+      <div style={{ border: '1px solid var(--hair)', borderRadius: 12, padding: '17px 19px', background: 'var(--surface-2)' }}>
+        <div style={{ fontSize: 13.4, color: 'var(--ink-3)', fontWeight: 600, marginBottom: 11 }}>공용 노드풀</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+          {split.shared.map((k) => (
+            <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 15.5, color: 'var(--ink-2)' }}>
+              <span style={{ width: 11, height: 11, borderRadius: 3, background: TENANTS[k].color, flexShrink: 0 }} />
+              {TENANTS[k].label}
+            </span>
+          ))}
+          {!moved && (
+            <span
+              className="pool-leaving"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 15.5, fontWeight: 700, color: iso.color }}
+            >
+              <span style={{ width: 11, height: 11, borderRadius: 3, background: iso.color, flexShrink: 0 }} />
+              {iso.label}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {moved && (
+        <>
+          <div className="pool-arrow" style={{ alignSelf: 'center', color: 'var(--ink-3)', fontSize: 24, lineHeight: 1 }}>⇣</div>
+          <div
+            className="pool-isolated"
+            style={{ border: `2px solid ${iso.color}`, borderRadius: 12, padding: '19px 21px', background: 'var(--surface-2)' }}
+          >
+            <div style={{ fontSize: 13.4, color: iso.color, fontWeight: 700, marginBottom: 11 }}>전용 노드풀 · 신규</div>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontSize: 21, fontWeight: 800, color: iso.color }}>
+              <span style={{ width: 15, height: 15, borderRadius: 4, background: iso.color, flexShrink: 0 }} />
+              {iso.label}
+            </span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 왜 쿼터만 올려선 안 되는가 — 근거 3종을 텍스트 체크리스트 대신 시각 카드 3장(세로)으로 */
+function ReasonTrioViz({ r }: {
+  r: { need: number; pool: number; slopePerMin: number; timesNormal: number; cv: number; historyNote: string };
+}) {
+  const gapPct = Math.min(100, (r.pool / r.need) * 100);
+  const gaugePct = Math.min(100, (r.timesNormal / 4) * 100);
+  return (
+    <div style={{ marginTop: 9.6, display: 'flex', flexDirection: 'column', gap: 11 }}>
+      <div style={{ ...box, display: 'flex', flexDirection: 'column', gap: 11 }}>
+        <div style={{ fontSize: 13.6, color: 'var(--ink-3)', fontWeight: 700 }}>① 조달 가능량</div>
+        <div className="bar-track" style={{ height: 22, position: 'relative' }}>
+          <div className="bar-fill" style={{ width: `${gapPct}%`, background: 'var(--ink-3)' }} />
+          <span style={{ position: 'absolute', right: 0, top: -4, width: 2.6, height: 30, background: 'var(--crit)' }} />
+        </div>
+        <div className="mono" style={{ fontSize: 17 }}>
+          <span style={{ color: 'var(--ink)', fontWeight: 700 }}>{r.pool.toLocaleString('ko-KR')}</span>
+          <span style={{ color: 'var(--ink-3)' }}> / {r.need.toLocaleString('ko-KR')} rps</span>
+          <span style={{ color: 'var(--crit)', fontWeight: 700, marginLeft: 12 }}>부족 {(r.need - r.pool).toLocaleString('ko-KR')} rps</span>
+        </div>
+      </div>
+
+      <div style={{ ...box, display: 'flex', flexDirection: 'column', gap: 11 }}>
+        <div style={{ fontSize: 13.6, color: 'var(--ink-3)', fontWeight: 700 }}>② 기울기 · 변동성</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14 }}>
+          <div className="mono" style={{ fontSize: 34, fontWeight: 800, color: 'var(--warn)', lineHeight: 1 }}>{r.timesNormal}×</div>
+          <div style={{ fontSize: 14.4, color: 'var(--ink-3)' }}>+{r.slopePerMin} rps/분 · CV {r.cv}</div>
+        </div>
+        <div className="bar-track" style={{ height: 14 }}>
+          <div className="bar-fill" style={{ width: `${gaugePct}%`, background: 'var(--warn)' }} />
+        </div>
+      </div>
+
+      <div style={{ ...box, display: 'flex', flexDirection: 'column', gap: 9 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <svg width="18.4" height="18.4" viewBox="0 0 24 24" fill="none" stroke="var(--crit)" strokeWidth="2.6" strokeLinecap="round" style={{ flexShrink: 0 }}>
+            <path d="M12 8v5" /><path d="M12 16.5v.5" /><circle cx="12" cy="12" r="9" />
+          </svg>
+          <span style={{ fontSize: 13.6, color: 'var(--ink-3)', fontWeight: 700 }}>③ 과거 동일 상황</span>
+        </div>
+        <div style={{ fontSize: 16, color: 'var(--ink)', fontWeight: 600, lineHeight: 1.55 }}>{r.historyNote}</div>
+      </div>
+    </div>
+  );
+}
+
+const POOL_W = 640;
+const POOL_H = 220;
+const POOL_Y_MAX = 100;
+
+/** 쿨다운 — RDS Proxy 풀 점유율이 위험선에서 목표선 아래로 내려오는 과정을 p99 그래프와 같은 언어로 보여준다 */
+function PoolOccupancyChart({ data }: { data: { series: number[]; target: number; goal: number } }) {
+  const { series, target, goal } = data;
+  const xOf = (i: number) => (i / (series.length - 1)) * POOL_W;
+  const yOf = (v: number) => POOL_H - (Math.min(v, POOL_Y_MAX) / POOL_Y_MAX) * POOL_H;
+  const goalIdx = series.findIndex((v) => v <= goal);
+  const ticks = [0, 25, 50, 75, 100];
+  return (
+    <div style={{ ...box, marginTop: 9.6, padding: '16.8px 19.2px', display: 'flex', flexDirection: 'column', gap: 9.6 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 9.6, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 15.6, fontWeight: 700, color: 'var(--ink)' }}>RDS Proxy 풀 점유율</span>
+        <span style={{ fontSize: 12.6, color: 'var(--ink-3)' }}>목표 {goal}% 이하</span>
+      </div>
+      <div style={{ height: 208, position: 'relative', paddingRight: 40 }}>
+        <svg viewBox={`0 0 ${POOL_W} ${POOL_H}`} preserveAspectRatio="none" style={{ width: '100%', height: '100%', display: 'block' }} role="img" aria-label="RDS Proxy 풀 점유율 추이">
+          <line x1="0" y1={POOL_H} x2={POOL_W} y2={POOL_H} stroke="var(--rule)" strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
+          {ticks.map((v) => (
+            <line key={v} x1="0" y1={yOf(v)} x2={POOL_W} y2={yOf(v)} stroke="var(--hair)" strokeWidth="1" vectorEffect="non-scaling-stroke" />
+          ))}
+          <line x1="0" y1={yOf(target)} x2={POOL_W} y2={yOf(target)} stroke="var(--crit)" strokeWidth="1.6" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
+          <line x1="0" y1={yOf(goal)} x2={POOL_W} y2={yOf(goal)} stroke="var(--warn)" strokeWidth="1.6" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
+          <polyline
+            fill="none" stroke="var(--accent)" strokeWidth="2.8" strokeLinejoin="round" vectorEffect="non-scaling-stroke"
+            points={series.map((v, i) => `${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' ')}
+          />
+          {goalIdx >= 0 && (
+            <circle cx={xOf(goalIdx)} cy={yOf(series[goalIdx])} r="4.6" fill="#16a34a" stroke="var(--surface)" strokeWidth="1.4" vectorEffect="non-scaling-stroke" />
+          )}
+        </svg>
+        {goalIdx >= 0 && (
+          <span
+            className="mono"
+            style={{
+              position: 'absolute', left: `${(goalIdx / (series.length - 1)) * 100}%`,
+              top: `${(1 - series[goalIdx] / POOL_Y_MAX) * 100}%`,
+              transform: 'translate(8px, -130%)', fontSize: 11.5, fontWeight: 700, color: '#16a34a', whiteSpace: 'nowrap',
+            }}
+          >
+            목표 도달 · {series[goalIdx]}%
+          </span>
+        )}
+        <span style={{ position: 'absolute', right: 0, top: `${(1 - target / POOL_Y_MAX) * 100}%`, transform: 'translateY(-50%)', fontSize: 12, color: 'var(--crit)', whiteSpace: 'nowrap' }}>위험 {target}%</span>
+        <span style={{ position: 'absolute', right: 0, top: `${(1 - goal / POOL_Y_MAX) * 100}%`, transform: 'translateY(-50%)', fontSize: 12, color: 'var(--warn)', whiteSpace: 'nowrap' }}>목표 {goal}%</span>
+        {ticks.filter((v) => v !== target && v !== goal).map((v) => (
+          <span key={v} style={{ position: 'absolute', right: 0, top: `${(1 - v / POOL_Y_MAX) * 100}%`, transform: 'translateY(-50%)', fontSize: 11, color: 'var(--ink-3)', whiteSpace: 'nowrap' }}>{v}%</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* payload 모양에 따라 알아서 그린다 — 실제 에이전트 출력이 바뀌면 여기만 손보면 된다 */
 function Payload({ data }: { data: unknown }) {
   if (!data || typeof data !== 'object') return null;
   const d = data as Record<string, unknown>;
 
+  if (d.reasonTrio && typeof d.reasonTrio === 'object') {
+    return (
+      <ReasonTrioViz
+        r={d.reasonTrio as { need: number; pool: number; slopePerMin: number; timesNormal: number; cv: number; historyNote: string }}
+      />
+    );
+  }
+
   if (Array.isArray(d.lines)) {
     return (
-      <div className="mono" style={{ ...box, fontSize: 13.8, color: 'var(--ink-2)', lineHeight: 1.8, marginTop: 9.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {(d.lines as string[]).map((l) => <div key={l}>{l}</div>)}
-      </div>
+      <>
+        <div className="mono" style={{ ...box, fontSize: 13.8, color: 'var(--ink-2)', lineHeight: 1.8, marginTop: 9.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {(d.lines as string[]).map((l) => <div key={l}>{l}</div>)}
+        </div>
+        {!!d.nodepoolSplit && (
+          <NodepoolSplitViz split={d.nodepoolSplit as { tenant: TenantKey; shared: TenantKey[] }} />
+        )}
+      </>
     );
   }
 
@@ -53,30 +220,30 @@ function Payload({ data }: { data: unknown }) {
   if (Array.isArray(d.donors)) {
     const rows = d.donors as { name: string; quota: number; future: number; giveable: number; risk: number; note: string }[];
     return (
-      <div style={{ marginTop: 9.6, border: '1px solid var(--hair)', borderRadius: 10.8, overflow: 'hidden' }}>
-        <div className="mono" style={{ display: 'flex', gap: 9.6, padding: '8.4px 13.2px', background: 'var(--surface-2)', fontSize: 12.6, color: 'var(--ink-3)' }}>
+      <div style={{ marginTop: 9.6, border: '1px solid var(--hair)', borderRadius: 13, overflow: 'hidden' }}>
+        <div className="mono" style={{ display: 'flex', gap: 13, padding: '13px 18px', background: 'var(--surface-2)', fontSize: 14.5, color: 'var(--ink-3)' }}>
           <span style={{ flexGrow: 1 }}>도너</span>
-          <span style={{ width: 55.2, textAlign: 'right' }}>쿼터</span>
-          <span style={{ width: 55.2, textAlign: 'right' }}>미래</span>
-          <span style={{ width: 62.4, textAlign: 'right' }}>줄 수 있음</span>
-          <span style={{ width: 48, textAlign: 'right' }}>위험도</span>
+          <span style={{ width: 76, textAlign: 'right' }}>쿼터</span>
+          <span style={{ width: 76, textAlign: 'right' }}>미래</span>
+          <span style={{ width: 74, textAlign: 'right' }}>가용량</span>
+          <span style={{ width: 64, textAlign: 'right' }}>위험도</span>
         </div>
         {rows.map((r) => {
           const hot = r.risk >= 60;
           return (
-            <div key={r.name} style={{ padding: '9.6px 13.2px', borderTop: '1px solid var(--hair)' }}>
-              <div className="mono" style={{ display: 'flex', gap: 9.6, fontSize: 13.8 }}>
-                <span style={{ flexGrow: 1, color: 'var(--ink)' }}>{r.name}</span>
-                <span style={{ width: 55.2, textAlign: 'right', color: 'var(--ink-3)' }}>{r.quota.toLocaleString('ko-KR')}</span>
-                <span style={{ width: 55.2, textAlign: 'right', color: 'var(--ink-3)' }}>−{r.future.toLocaleString('ko-KR')}</span>
-                <span style={{ width: 62.4, textAlign: 'right', color: 'var(--ink)', fontWeight: 600 }}>{r.giveable}</span>
-                <span style={{ width: 48, textAlign: 'right', fontWeight: 700, color: hot ? 'var(--crit)' : 'var(--ink-2)' }}>{r.risk}</span>
+            <div key={r.name} style={{ padding: '18px', borderTop: '1px solid var(--hair)' }}>
+              <div className="mono" style={{ display: 'flex', gap: 13, fontSize: 17 }}>
+                <span style={{ flexGrow: 1, color: 'var(--ink)', fontWeight: 700 }}>{r.name}</span>
+                <span style={{ width: 76, textAlign: 'right', color: 'var(--ink-3)' }}>{r.quota.toLocaleString('ko-KR')}</span>
+                <span style={{ width: 76, textAlign: 'right', color: 'var(--ink-3)' }}>−{r.future.toLocaleString('ko-KR')}</span>
+                <span style={{ width: 74, textAlign: 'right', color: 'var(--ink)', fontWeight: 700 }}>{r.giveable}</span>
+                <span style={{ width: 64, textAlign: 'right', fontWeight: 700, color: hot ? 'var(--crit)' : 'var(--ink-2)' }}>{r.risk}</span>
               </div>
-              <div style={{ fontSize: 12.6, color: hot ? 'var(--crit)' : 'var(--ink-3)', marginTop: 3.6 }}>{r.note}</div>
+              <div style={{ fontSize: 14.2, color: hot ? 'var(--crit)' : 'var(--ink-3)', marginTop: 5.6 }}>{r.note}</div>
             </div>
           );
         })}
-        <div style={{ padding: '8.4px 13.2px', borderTop: '1px solid var(--hair)', fontSize: 12.6, color: 'var(--ink-3)' }}>
+        <div style={{ padding: '13px 18px', borderTop: '1px solid var(--hair)', fontSize: 13.6, color: 'var(--ink-3)' }}>
           위험도 = 추세 0.3 + 이벤트 0.4 + 변동성 0.3
         </div>
       </div>
@@ -125,16 +292,20 @@ function Payload({ data }: { data: unknown }) {
 
   if (Array.isArray(d.options)) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 9.6 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10.8, marginTop: 9.6 }}>
         {(d.options as { name: string; verdict: string; note: string }[]).map((o) => {
           const on = o.verdict === '채택';
           return (
-            <div key={o.name} style={{ display: 'flex', alignItems: 'flex-start', gap: 10.8, padding: '9.6px 13.2px', borderRadius: 9.6, background: on ? 'rgba(57,135,229,.12)' : 'var(--surface-2)', border: on ? '1px solid var(--accent)' : '1px solid transparent' }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: on ? 'var(--accent)' : 'var(--ink-3)', width: 31.2, flexShrink: 0, paddingTop: 1.2 }}>{o.verdict}</span>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 15, color: on ? 'var(--ink)' : 'var(--ink-3)', fontWeight: on ? 600 : 400 }}>{o.name}</div>
-                <div style={{ fontSize: 13.2, color: 'var(--ink-3)', marginTop: 2.4 }}>{o.note}</div>
-              </div>
+            <div
+              key={o.name}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 14.4, padding: '19.2px 20px', borderRadius: 11,
+                background: on ? 'rgba(57,135,229,.12)' : 'var(--surface-2)',
+                border: on ? '1px solid var(--accent)' : '1px solid transparent',
+              }}
+            >
+              <span style={{ fontSize: 13, fontWeight: 700, color: on ? 'var(--accent)' : 'var(--ink-3)', width: 40, flexShrink: 0 }}>{o.verdict}</span>
+              <div style={{ fontSize: 19, lineHeight: 1.4, color: on ? 'var(--ink)' : 'var(--ink-3)', fontWeight: on ? 700 : 500, minWidth: 0 }}>{o.name}</div>
             </div>
           );
         })}
@@ -172,6 +343,9 @@ function Payload({ data }: { data: unknown }) {
             {c.note && <span className="mono" style={{ fontSize: 12.6, color: 'var(--ink-3)' }}>{c.note}</span>}
           </div>
         ))}
+        {d.poolChart && typeof d.poolChart === 'object'
+          ? <PoolOccupancyChart data={d.poolChart as { series: number[]; target: number; goal: number }} />
+          : null}
         <div style={{ borderTop: '1px solid var(--hair)', paddingTop: 8.4, fontSize: 13.2, color: 'var(--ink-3)' }}>
           {d.footer
             ? String(d.footer)
@@ -326,7 +500,7 @@ function Payload({ data }: { data: unknown }) {
 }
 
 export default function AgentLane({
-  title, subtitle, steps, width, empty, verdict,
+  title, subtitle, steps, width, empty, verdict, chain = [],
 }: {
   title: string;
   subtitle: string;
@@ -335,6 +509,8 @@ export default function AgentLane({
   empty: string;
   /** 이번 실행의 판정 — 정확도는 사후 배치 평가에서 나오므로 실행 중엔 이걸 쓴다 */
   verdict?: string;
+  /** 단계가 바뀌어도 남는 것 — 지금까지 확정된 사실 */
+  chain?: { label: string; value: string; state: 'done' | 'now' | 'todo' }[];
 }) {
   const model = steps.find((s) => s.model)?.model;
   const boxRef = useRef<HTMLDivElement>(null);
@@ -353,34 +529,46 @@ export default function AgentLane({
         minHeight: 0, minWidth: 0, overflow: 'hidden',
       }}
     >
-      {/* 헤더는 스크롤 밖에 둔다 — sticky 로 겹치면 글자가 깨진다 */}
+      {/* 고정 머리 — 왼쪽 쿼터 카드 하단과 끝이 맞는다.
+          단계가 바뀌어도 여기 있는 것들은 안 사라진다. */}
       <div
         style={{
-          flexShrink: 0, display: 'flex', alignItems: 'baseline', gap: 11.1,
-          padding: '15.7px 20.3px 12px', borderBottom: '1px solid var(--hair)',
-          background: 'var(--surface)',
+          height: FIXED_H, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8,
+          padding: '13px 20.3px 12px', borderBottom: '1px solid var(--hair)', background: 'var(--surface)',
         }}
       >
-        <span style={{ fontSize: 16.6, fontWeight: 700, whiteSpace: 'nowrap' }}>{title}</span>
-        <span style={{ fontSize: 12.9, color: 'var(--ink-3)', whiteSpace: 'nowrap', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{subtitle}</span>
-        <span style={{ flexGrow: 1 }} />
-        {model && (
-          <span
-            className="mono"
-            title={model}
-            style={{
-              fontSize: 12.7, color: '#9085e9', background: 'rgba(144,133,233,.14)',
-              padding: '3.5px 10.5px', borderRadius: 7, whiteSpace: 'nowrap', fontWeight: 700, flexShrink: 0,
-            }}
-          >
-            {MODEL_LABEL}
-          </span>
-        )}
-        {verdict && (
-          <span style={{ fontSize: 13.2, color: 'var(--ink-2)', background: 'rgba(255,255,255,.06)', padding: '3.5px 10.5px', borderRadius: 7, whiteSpace: 'nowrap', flexShrink: 0 }}>
-            {verdict}
-          </span>
-        )}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 11.1, flexShrink: 0 }}>
+          <span style={{ fontSize: 16.6, fontWeight: 700, whiteSpace: 'nowrap' }}>{title}</span>
+          <span style={{ fontSize: 12.9, color: 'var(--ink-3)', whiteSpace: 'nowrap', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{subtitle}</span>
+          <span style={{ flexGrow: 1 }} />
+          {model && (
+            <span className="mono" title={model} style={{ fontSize: 12.7, color: '#9085e9', background: 'rgba(144,133,233,.14)', padding: '3.5px 10.5px', borderRadius: 7, whiteSpace: 'nowrap', fontWeight: 700, flexShrink: 0 }}>
+              {MODEL_LABEL}
+            </span>
+          )}
+          {verdict && (
+            <span style={{ fontSize: 13.2, color: 'var(--ink-2)', background: 'rgba(255,255,255,.06)', padding: '3.5px 10.5px', borderRadius: 7, whiteSpace: 'nowrap', flexShrink: 0 }}>
+              {verdict}
+            </span>
+          )}
+        </div>
+
+        <div style={{ flexGrow: 1, minHeight: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-evenly' }}>
+          {chain.map((c) => (
+            <div key={c.label} style={{ display: 'flex', alignItems: 'baseline', gap: 10, opacity: c.state === 'todo' ? 0.38 : 1 }}>
+              <span style={{ width: 13, flexShrink: 0, fontSize: 13, fontWeight: 700, color: c.state === 'done' ? '#16a34a' : c.state === 'now' ? 'var(--warn)' : 'var(--ink-3)' }}>
+                {c.state === 'todo' ? '·' : '✓'}
+              </span>
+              <span style={{ width: 74, flexShrink: 0, fontSize: 12.4, color: 'var(--ink-3)' }}>{c.label}</span>
+              <span
+                className="mono"
+                style={{ fontSize: 13.6, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: c.state === 'now' ? 'var(--ink)' : 'var(--ink-2)', fontWeight: c.state === 'now' ? 700 : 400 }}
+              >
+                {c.value}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div
@@ -391,16 +579,48 @@ export default function AgentLane({
         }}
       >
       {steps.length === 0 && (
-        <div style={{ fontSize: 15, color: 'var(--ink-3)', lineHeight: 1.7 }}>{empty}</div>
+        <div style={{ fontSize: 15, color: 'var(--ink-3)', lineHeight: 1.7 }}>
+          {empty}<span className="dots">.....</span>
+        </div>
       )}
 
-      {steps.map((s) => {
+      {steps.map((s, si) => {
         const newPhase = s.phase !== lastPhase;
         lastPhase = s.phase;
+
+        // 사용률 재확인 카운터 스텝 — 체크·시간 배지 없이 "(1/3)" + 그 아래 상세 내용까지 통째로 한 단위로 쌓이며 내려간다
+        const counterPayload = s.payload as { counter?: number; total?: number; lines?: string[] } | undefined;
+        if (typeof counterPayload?.counter === 'number' && typeof counterPayload?.total === 'number') {
+          return (
+            <div key={s.id} className="log-enter">
+              <div style={{ fontSize: 16.5, fontWeight: 600, color: 'var(--ink-2)' }}>
+                사용률 재확인 ({counterPayload.counter}/{counterPayload.total})
+              </div>
+              {Array.isArray(counterPayload.lines) && (
+                <div className="mono" style={{ ...box, fontSize: 13.8, color: 'var(--ink-2)', lineHeight: 1.8, marginTop: 7.2, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {counterPayload.lines.map((l) => <div key={l}>{l}</div>)}
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        // 쿨다운 헤더(q-cool)는 뒤에 모니터링 로그가 쌓여도 접히지 않고 맨 위 '메인 글'로 고정된다
+        const folded = si < steps.length - 1 && s.id !== 'q-cool';
+        if (folded) {
+          return (
+            <div key={s.id} style={{ display: 'flex', alignItems: 'baseline', gap: 9.6, opacity: 0.5, transition: 'opacity .45s ease' }}>
+              <span style={{ fontSize: 12.6, fontWeight: 700, color: '#16a34a' }}>✓</span>
+              <span style={{ fontSize: 13.6, color: 'var(--ink-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</span>
+              <span style={{ flexGrow: 1 }} />
+              <span className="mono" style={{ fontSize: 12, color: 'var(--ink-3)', flexShrink: 0 }}>+{(s.t / 1000).toFixed(0)}s</span>
+            </div>
+          );
+        }
         return (
-          <div key={s.id}>
+          <div key={s.id} className="log-enter log-flash" style={{ padding: '3px 8px', margin: '-3px -8px', transition: 'opacity .3s ease' }}>
             {newPhase && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 9.6, margin: '7.2px 12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9.6, margin: '2px 12px 7.2px' }}>
                 <span style={{ fontSize: 12.6, fontWeight: 700, letterSpacing: '.08em', color: 'var(--ink-3)' }}>
                   {PHASE_LABEL[s.phase].toUpperCase()}
                 </span>
@@ -408,15 +628,20 @@ export default function AgentLane({
               </div>
             )}
             <div style={{ display: 'flex', alignItems: 'center', gap: 9.6, flexWrap: 'wrap' }}>
-              <span className="mono" style={{ fontSize: 13.2, color: 'var(--ink-3)' }}>{s.state}</span>
               <Badge executor={s.executor} />
               <span style={{ flexGrow: 1 }} />
               <span className="mono" style={{ fontSize: 12.6, color: 'var(--ink-3)' }}>+{(s.t / 1000).toFixed(0)}s</span>
             </div>
-            <div style={{ fontSize: 16.2, fontWeight: 600, marginTop: 6 }}>{s.title}</div>
-            {s.detail && (
-              <div style={{ fontSize: 14.4, color: 'var(--ink-2)', marginTop: 4.8, lineHeight: 1.65 }}>{s.detail}</div>
-            )}
+            <div
+              style={{
+                fontSize: 19, fontWeight: 600, marginTop: 6,
+                whiteSpace: s.id === 'q-donors' ? 'nowrap' : undefined,
+                overflow: s.id === 'q-donors' ? 'hidden' : undefined,
+                textOverflow: s.id === 'q-donors' ? 'ellipsis' : undefined,
+              }}
+            >
+              {s.title}
+            </div>
             <Payload data={s.payload} />
             <div style={{ height: 16.8 }} />
           </div>

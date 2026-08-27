@@ -4,17 +4,25 @@ import type { AgentStep, Projection, RunTimeline, TenantKey, TenantSample } from
  * ⚠️ 에이전트 이벤트는 전부 목업이다. 숫자도 예시값.
  * 실제 Step Functions 실행 이력이 나오면 loadRun() 만 갈아끼우면 화면은 그대로 돈다.
  *
- * 시나리오 — 추석 연휴 직후 CJ 대한통운 택배 물량 폭주 (단일 사건 · 두 축)
+ * Agent 1 과 Agent 2 는 완전히 별개 상황이다 — 타임라인 · 시계 · 데이터를 공유하지 않는다.
+ * 발표에서 두 시연을 각각 따로 녹화하므로, 한 에이전트의 화면·대사가 다른 에이전트를 가리키면 안 된다.
+ *
+ * Agent 1 (쿼터 축 · 예방적) — 추석 연휴 직후 CJ 대한통운 택배 물량 폭주
  *   연휴엔 주문은 쌓이는데 배송이 안 나간다. 연휴가 끝나면 적체분이 한꺼번에 배송완료되고,
- *   배송완료 즉시 보낸 사람에게 CJ ONE 포인트가 적립된다.
- *   Agent 1 (쿼터 축)  적립 RPS 가 쿼터 80% 도달 → 파이 안에서 재분배
- *   Agent 2 (인프라 축) 적립 P99 가 2 초대로 급등 → 공용 RDS 커넥션 풀 소진 진단 → 조치
+ *   배송완료 즉시 보낸 사람에게 CJ ONE 포인트가 적립된다. 적립 RPS 가 쿼터 80% 도달 → 파이 안에서 재분배.
+ *
+ * Agent 2 (이상탐지 · 사후적) — 대한통운(oliveyoung)이 전용 노드풀로 격리된 뒤에도 데이터 계층(Aurora ·
+ *   RDS Proxy)은 여전히 공유다. 그 위에서 CJ 온스타일(cgv)이 라이브 커머스 방송을 시작해 적립 쓰기가
+ *   몰리며 공용 풀이 소진된다 — 뚜레쥬르(cjenm) · VIPS(vips) 도 함께 느려진다. Agent 1 의 사건과는
+ *   무관한 별개 상황이다 (같은 인프라 배경만 공유할 뿐, 트리거·원인·조치는 전혀 다르다).
  *
  * ⚠️ 코드 키(cgv/cjenm/oliveyoung)는 백엔드 tenantId 계약이라 그대로 두고,
  *    화면 표시는 TENANTS[key].label 로만 바꾼다. 설정 출력 줄의 id 는 새 브랜드 기준으로 적었다.
  */
 
-const DURATION = 150_000;
+/** 두 에이전트는 완전히 별개 상황이다. 타임라인도 시계도 데이터도 따로 돈다. */
+const DURATION_Q = 90_000;    // Agent 1 — 추석 연휴 직후 물량 폭주
+const DURATION_I = 100_000;   // Agent 2 — 격리 후에도 남는 공유 자원 문제 (Agent 1 과 무관)
 
 /** ⚠️ 실제 쓰는 Bedrock 모델 ID 로 교체할 것 */
 export const MODEL_ID = 'anthropic.claude-sonnet-4-20250514-v1:0';
@@ -23,6 +31,8 @@ export const MODEL_LABEL = 'Sonnet 4';
 /** 단가 가정 — 100만 토큰당 USD. 실제 요금표로 교체 */
 export const RATE_PER_M = { in: 3, out: 15 };
 const SLO_MS = 300;
+/** Agent 2 전용 SLO — 이번 시나리오는 1초 기준(Agent 1의 300ms와 다르다) */
+const SLO_MS_INCIDENT = 1_000;
 
 const QUOTA: Record<TenantKey, number> = { cgv: 1200, cjenm: 900, oliveyoung: 3600, vips: 600 };
 const BASE_QPS: Record<TenantKey, number> = { cgv: 360, cjenm: 240, oliveyoung: 2700, vips: 120 };
@@ -33,17 +43,73 @@ const PROJECTION: Projection = {
   currentRps: 2880,
   quota: 3600,
   horizonMin: 30,
-  slopePerMin: 36,
-  trendRps: 3960,   // 2,880 + 36 × 30
-  eventRps: 4000,   // baseline 1,250 × 적체 예상배수 3.2 × 보정 1.0
-  expectedRps: 4000,
-  needRps: 400,
-  poolFreeRps: 870,
+  slopePerMin: 72,   // 평시 트리거 대비 3.1배 — 기울기가 가파르다
+  trendRps: 5040,    // 2,880 + 72 × 30
+  eventRps: 5600,    // baseline 1,250 × 적체 예상배수 4.3 × 보정 1.04
+  expectedRps: 5600,
+  needRps: 2000,
+  poolFreeRps: 870,  // 도너 3곳을 다 합쳐도 이만큼뿐
 };
 
-/** 집행(t=48s) 전후 쿼터 — 총 파이 6,300 rps 는 변하지 않는다 (zero-sum) */
-const QUOTA_AFTER: Record<TenantKey, number> = { cgv: 900, cjenm: 800, oliveyoung: 4000, vips: 600 };
-const REBALANCE_AT = 48_000;
+/** Agent 2 는 projection 기반 투영을 쓰지 않는다 (트리거가 쿼터%가 아니라 이상탐지 알람이라서).
+ *  RunTimeline 타입이 projection 필드를 요구해서 채워둔 값일 뿐 — tenant 만 HitlPopup 표시에 쓰이고,
+ *  나머지 숫자는 전부 0 이며 화면(Slot)은 agent === 'quota' 일 때만 이 값을 그린다. */
+const INCIDENT_PROJECTION: Projection = {
+  tenant: 'cgv', // CJ ONSTYLE — 이번 사건의 발화 테넌트 (HitlPopup 표시에만 쓰인다)
+  currentRps: 0,
+  quota: 0,
+  horizonMin: 0,
+  slopePerMin: 0,
+  trendRps: 0,
+  eventRps: 0,
+  expectedRps: 0,
+  needRps: 0,
+  poolFreeRps: 0,
+};
+
+/** 노드풀 격리(t=38s · 진단 종료 = 조치 시작) 전후 쿼터.
+ *  재분배가 아니라 파이 자체를 키우는 분기라 도너 쿼터는 그대로다. */
+const QUOTA_AFTER: Record<TenantKey, number> = { cgv: 1200, cjenm: 900, oliveyoung: 5600, vips: 600 };
+const REBALANCE_AT = 38_000;
+
+/** Agent 1 트리아지에서 조회하는 비즈니스 스케줄 이력 — 과거 실측(왼쪽) / 이번 주(오른쪽) */
+export interface ScheduleRow { when: string; name: string; note: string; tag?: string; hot?: boolean; dim?: boolean }
+export const BUSINESS_EVENTS: { title: string; sub: string; rows: ScheduleRow[] }[] = [
+  {
+    title: '2025',
+    sub: 'S3 장기보관 → Athena',
+    rows: [
+      { when: '25/10/03 – 10/06', name: '추석 연휴', note: '배송 중단' },
+      { when: '25/10/07', name: '연휴 종료 익일', note: '노드풀 공유 테넌트 동반 지연', tag: '장애 1건', hot: true },
+      { when: '실측 / 예상', name: '1.04', note: '보정계수', tag: '보정' },
+    ],
+  },
+  {
+    title: '2026',
+    sub: '추세 +72 rps/분 · 평시 3.1배',
+    rows: [
+      { when: '9/24 – 9/27', name: '추석 연휴', note: '배송 중단 · 주문 적체' },
+      { when: '9/28  오늘', name: '연휴 종료 익일', note: '적체분 일괄 배송완료', tag: '예상배수 ×3.2', hot: true },
+      { when: '10/03 – 10/05', name: '개천절 연휴', note: '동일 패턴 재발 예상', dim: true },
+    ],
+  },
+];
+
+/** 30분 지평 투영 — 맨 위 파선이 임계점(대한통운 쿼터) */
+export const FORECAST = {
+  horizonMin: 30,
+  threshold: QUOTA.oliveyoung,
+  yMax: 6200,
+  series: [
+    { tenant: 'oliveyoung' as TenantKey, from: 2880, to: 5600 },
+    { tenant: 'cgv' as TenantKey, from: 360, to: 385 },
+    { tenant: 'cjenm' as TenantKey, from: 240, to: 305 },
+    { tenant: 'vips' as TenantKey, from: 120, to: 132 },
+  ],
+  /** 트리아지 구간에서 선이 그려진다 */
+  drawFrom: 8_000,
+  drawTo: 19_000,
+};
 
 function jitter(seed: number, amp: number): number {
   return ((Math.sin(seed * 12.9898) * 43758.5453) % 1) * amp;
@@ -51,58 +117,143 @@ function jitter(seed: number, amp: number): number {
 const lerp = (a: number, b: number, r: number) => a + (b - a) * Math.min(1, Math.max(0, r));
 
 /** 적체분이 순차로 배송완료되며 적립 요청이 계속 오른다 */
-function logisticsQps(t: number): number {
+function quotaRunQps(t: number): number {
   if (t < 8_000) return lerp(2700, 2880, t / 8_000);
-  if (t < 36_000) return lerp(2880, 3280, (t - 8_000) / 28_000);
-  return lerp(3280, 3400, (t - 36_000) / 84_000);
+  if (t < 44_000) return lerp(2880, 3520, (t - 8_000) / 36_000);
+  if (t < 112_000) return lerp(3520, 4850, (t - 44_000) / 68_000);
+  return lerp(4850, 5100, (t - 112_000) / 38_000);
 }
 
 /** 재분배로 통과량이 늘자 커넥션 풀이 상한에 닿고 적립 지연이 2 초대로 뛴다 */
-function logisticsP99(t: number): number {
+function quotaRunP99(t: number): number {
   if (t < 44_000) return BASE_P99.oliveyoung;
   if (t < 112_000) return lerp(BASE_P99.oliveyoung, 2150, (t - 44_000) / 68_000);
   if (t < 132_000) return lerp(2150, 160, (t - 112_000) / 20_000);
   return 155;
 }
 
-function buildSamples(): TenantSample[] {
+function buildSamples(
+  duration: number,
+  qps: (t: number) => number,
+  p99: (t: number) => number,
+  quotaAt: (t: number) => Record<TenantKey, number>,
+): TenantSample[] {
   const out: TenantSample[] = [];
-  for (let t = 0; t <= DURATION; t += 1000) {
+  for (let t = 0; t <= duration; t += 1000) {
     const i = t / 1000;
     out.push({
       t,
       qps: {
         cgv: Math.round(BASE_QPS.cgv + jitter(i + 1, 14)),
         cjenm: Math.round(BASE_QPS.cjenm + jitter(i + 2, 12)),
-        oliveyoung: Math.round(logisticsQps(t)),
+        oliveyoung: Math.round(qps(t)),
         vips: Math.round(BASE_QPS.vips + jitter(i + 3, 8)),
       },
       p99: {
         cgv: Math.round(BASE_P99.cgv + jitter(i + 4, 10)),
         cjenm: Math.round(BASE_P99.cjenm + jitter(i + 5, 6)),
-        oliveyoung: Math.round(logisticsP99(t) + jitter(i + 6, 14)),
+        oliveyoung: Math.round(p99(t) + jitter(i + 6, 14)),
         vips: Math.round(BASE_P99.vips + jitter(i + 7, 5)),
       },
-      quotaLimit: t < REBALANCE_AT ? QUOTA : QUOTA_AFTER,
+      quotaLimit: quotaAt(t),
       leading: {
-        connPoolPct: Math.round(t < 44_000 ? 62 : t < 80_000 ? lerp(62, 96, (t - 44_000) / 36_000) : t < 112_000 ? 96 : lerp(96, 64, (t - 112_000) / 20_000)),
-        threadQueue: Math.round(t < 50_000 ? 18 : t < 90_000 ? lerp(18, 310, (t - 50_000) / 40_000) : t < 112_000 ? 310 : lerp(310, 22, (t - 112_000) / 20_000)),
-        connWaitSlope: Number((t < 44_000 ? 0.4 : t < 90_000 ? lerp(0.4, 8.3, (t - 44_000) / 46_000) : t < 112_000 ? 8.3 : 0.6).toFixed(1)),
-        hpaReplicas: t < 48_000 ? 6 : t < 70_000 ? 9 : t < 112_000 ? 10 : 7,
+        connPoolPct: Math.round(t < 20_000 ? 62 : t < 50_000 ? lerp(62, 96, (t - 20_000) / 30_000) : t < 68_000 ? 96 : lerp(96, 64, (t - 68_000) / 18_000)),
+        threadQueue: Math.round(t < 24_000 ? 18 : t < 56_000 ? lerp(18, 310, (t - 24_000) / 32_000) : t < 68_000 ? 310 : lerp(310, 22, (t - 68_000) / 18_000)),
+        connWaitSlope: Number((t < 20_000 ? 0.4 : t < 56_000 ? lerp(0.4, 8.3, (t - 20_000) / 36_000) : t < 68_000 ? 8.3 : 0.6).toFixed(1)),
+        hpaReplicas: t < 24_000 ? 6 : t < 40_000 ? 9 : t < 68_000 ? 10 : 7,
       },
     });
   }
   return out;
 }
 
-const STEPS: AgentStep[] = [
-  /* ── Agent 1 · 트래픽 기반 동적 자원 효율화 (최종 문서 기준) ──
-     LLM 은 '조합 선택' 단 한 곳에만 들어간다. 나머지는 전부 결정론. */
+/* Agent 2 — 자체 곡선. Agent 1 과 아무 관계 없다.
+ * 시나리오 — CJ 대한통운(oliveyoung)이 전용 노드풀로 격리된 뒤에도 데이터 계층(Aurora · RDS Proxy)은
+ * 여전히 공유다. 대한통운의 밀린 적립 쓰기 부하가 그 공용 풀을 이미 눌러놓은 상태에서,
+ * CJ 온스타일(cgv)이 라이브 커머스 방송을 시작해 적립 쓰기가 몰리며 풀이 터진다.
+ * 같은 풀을 쓰는 뚜레쥬르(cjenm) · VIPS(vips) 도 함께 느려진다 — 네 테넌트 모두 원인의 일부다. */
+
+/** CJ 온스타일 — 방송 시작 2초 후부터 적립 RPS 가 치솟는다 */
+function onstyleQps(t: number): number {
+  if (t < 2_000) return BASE_QPS.cgv;
+  if (t < 27_000) return lerp(BASE_QPS.cgv, 940, (t - 2_000) / 25_000);
+  if (t < 68_000) return 940;
+  if (t < 86_000) return lerp(940, 420, (t - 68_000) / 18_000);
+  return 380;
+}
+/** CJ 온스타일 — 적립 P99. 동적 베이스라인(168/182ms)은 방송 시작 2.6초 만에, 정적 임계값(500ms)은 6초 만에 넘는다 */
+function onstyleP99(t: number): number {
+  if (t < 2_000) return BASE_P99.cgv;
+  if (t < 27_000) return lerp(BASE_P99.cgv, 2_400, (t - 2_000) / 25_000);
+  if (t < 68_000) return 2_400;
+  if (t < 86_000) return lerp(2_400, 175, (t - 68_000) / 18_000);
+  return 168;
+}
+/** 같은 RDS Proxy 를 쓰는 나머지 테넌트 — 콜래터럴 지연. base → peak → base 로 되돌아온다 */
+function collateralP99(base: number, peak: number, t: number): number {
+  if (t < 5_000) return base;
+  if (t < 30_000) return lerp(base, peak, (t - 5_000) / 25_000);
+  if (t < 68_000) return peak;
+  if (t < 86_000) return lerp(peak, base + 12, (t - 68_000) / 18_000);
+  return base + 8;
+}
+/** 대한통운 — 이미 격리된 노드풀에서 안정 운영 중이지만, 밀린 적립 쓰기가 공용 풀을 계속 누른다 */
+function daehanP99(t: number): number { return collateralP99(300, 480, t); }
+function tousP99(t: number): number { return collateralP99(BASE_P99.cjenm, 1_180, t); }
+function vipsP99(t: number): number { return collateralP99(BASE_P99.vips, 1_120, t); }
+
+/** 공유 RDS Proxy 자체의 상태 — 네 테넌트가 공통으로 겪는 원인 지표 */
+function incidentLeading(t: number) {
+  const connPoolPct = t < 5_000 ? 60
+    : t < 35_000 ? lerp(60, 97, (t - 5_000) / 30_000)
+    : t < 68_000 ? 97
+    : lerp(97, 58, (t - 68_000) / 18_000);
+  const threadQueue = t < 5_000 ? 40
+    : t < 35_000 ? lerp(40, 340, (t - 5_000) / 30_000)
+    : t < 68_000 ? 340
+    : lerp(340, 45, (t - 68_000) / 18_000);
+  const connWaitSlope = Number((t < 5_000 ? 0.4
+    : t < 35_000 ? lerp(0.4, 9.1, (t - 5_000) / 30_000)
+    : t < 68_000 ? 9.1
+    : lerp(9.1, 0.6, (t - 68_000) / 18_000)).toFixed(1));
+  const hpaReplicas = t < 10_000 ? 6 : t < 27_000 ? 10 : t < 68_000 ? 10 : 7;
+  return { connPoolPct: Math.round(connPoolPct), threadQueue: Math.round(threadQueue), connWaitSlope, hpaReplicas };
+}
+
+function buildIncidentSamples(duration: number): TenantSample[] {
+  const out: TenantSample[] = [];
+  for (let t = 0; t <= duration; t += 1000) {
+    const i = t / 1000;
+    out.push({
+      t,
+      qps: {
+        cgv: Math.round(onstyleQps(t) + jitter(i + 1, 10)),
+        cjenm: Math.round(BASE_QPS.cjenm + jitter(i + 2, 12)),
+        oliveyoung: Math.round(1_900 + jitter(i + 3, 60)),
+        vips: Math.round(BASE_QPS.vips + jitter(i + 4, 8)),
+      },
+      p99: {
+        cgv: Math.round(onstyleP99(t) + jitter(i + 5, 14)),
+        cjenm: Math.round(tousP99(t) + jitter(i + 6, 8)),
+        oliveyoung: Math.round(daehanP99(t) + jitter(i + 7, 12)),
+        vips: Math.round(vipsP99(t) + jitter(i + 8, 6)),
+      },
+      quotaLimit: QUOTA_AFTER, // 대한통운은 Agent 1 에서 이미 5,600 으로 격리된 뒤 — 이 run 은 그 이후 시점
+      leading: incidentLeading(t),
+    });
+  }
+  return out;
+}
+
+const QUOTA_STEPS: AgentStep[] = [
+  /* ── Agent 1 · 트래픽 기반 동적 자원 효율화 ──
+     이번 경로는 재분배가 아니라 스케일링 에스컬레이션(노드풀 격리)이다.
+     파이 안에서 못 막는다는 걸 결정론으로 먼저 확정하고, 그 다음에만 LLM 이 개입한다. */
   {
     id: 'q-trigger', t: 8_000, agent: 'quota', phase: 'detect',
     state: 'trigger', executor: 'code',
     title: '트리거 — 사용률 80% 초과 지속',
-    detail: '배송 완료 시각은 새벽~밤으로 불규칙해 트래픽을 미리 맞출 수 없다. 그래서 관측(추세)과 비즈니스 데이터(이벤트)를 함께 쓴다.',
+    detail: '배송 완료 시각은 새벽~밤으로 불규칙해 트래픽을 미리 맞출 수 없다. 그래서 관측(추세)과 비즈니스 데이터를 함께 쓴다.',
     payload: { lines: ['cjlogistics  2,880 / 3,600 rps  =  80.0%  (2분 지속)'] },
   },
   {
@@ -111,8 +262,8 @@ const STEPS: AgentStep[] = [
     title: '데이터 3종 조회',
     payload: {
       lines: [
-        '① 추세      AMP(Prometheus)                최근 기울기 +36 rps/분',
-        '② 이벤트    DynamoDB cjone-business-events   추석 연휴 종료 익일 · 적체 물량 예상배수 3.2',
+        '① 추세      AMP(Prometheus)                최근 기울기 +72 rps/분  (평시 트리거 대비 3.1배)',
+        '② 이벤트    DynamoDB cjone-business-events   추석 연휴 종료 익일 · 적체 물량 예상배수 4.3',
         '③ 과거실측  S3 장기보관 → Athena            작년 추석 직후 실측/예상 = 1.04 → 보정',
       ],
     },
@@ -127,21 +278,22 @@ const STEPS: AgentStep[] = [
   {
     id: 'q-pool', t: 19_000, agent: 'quota', phase: 'triage',
     state: 'check_pool', executor: 'code',
-    title: '파이 안에서 조달 가능한가',
+    title: '파이 안에서 조달 가능한가 — 불가',
+    detail: '여기서 갈린다. 파이 안이면 재분배, 파이 밖이면 스케일링 에스컬레이션.',
     payload: {
       lines: [
-        '필요량            400 rps',
-        '전체 파이 여유    870 rps  (도너 3곳 합)',
-        '→ 조달 가능 · 재분배 진행',
-        '※ 초과였다면 스케일링 에스컬레이션 — 여기서 AI 는 손을 뗀다 (zero-sum)',
+        '필요량            2,000 rps',
+        '전체 파이 여유      870 rps  (도너 3곳 합)',
+        '부족               1,130 rps',
+        '→ 재분배 불가 · 스케일링 에스컬레이션 분기로 넘긴다',
       ],
     },
   },
   {
     id: 'q-donors', t: 25_000, agent: 'quota', phase: 'diagnose',
     state: 'build_candidates', executor: 'code',
-    title: '도너별 줄 수 있는 양 + 위험도',
-    detail: '"지금 남는 양"과 "내줄 수 있는 양"은 다르다. 도너의 미래 필요분을 먼저 뺀다.',
+    title: '도너를 다 합쳐도 모자란다',
+    detail: '"지금 남는 양"과 "내줄 수 있는 양"은 다르다. 도너의 미래 필요분을 먼저 뺀 값이다.',
     payload: {
       donors: [
         { name: 'CJ ONSTYLE', quota: 1200, future: 900, giveable: 300, risk: 22, note: '편성 이벤트 없음 · 변동성 낮음' },
@@ -151,20 +303,31 @@ const STEPS: AgentStep[] = [
     },
   },
   {
-    id: 'q-combo', t: 32_000, agent: 'quota', phase: 'diagnose',
-    state: 'select_combination', executor: 'llm',
-    model: MODEL_ID, tokens: { in: 3180, out: 420 },
-    title: '조합 선택 — 이 파이프라인에서 유일한 LLM 개입',
-    detail: '세 조합 모두 산술적으로 맞다. 영향받는 테넌트 수와 도너 위험도를 맞바꾸는 판단이라 단일 수식으로 고정할 수 없다.',
+    id: 'q-risk', t: 30_000, agent: 'quota', phase: 'diagnose',
+    state: 'assess_shape', executor: 'code',
+    title: '왜 쿼터만 올려선 안 되는가 — 근거 3종',
     payload: {
-      combos: [
-        { label: 'VIPS 단독 400', total: 400, chosen: false, reason: '위험도 81 — 저녁 예약 오픈이 3시간 뒤. 방금 푼 문제를 옆에서 다시 만든다' },
-        { label: 'CJ ONSTYLE 300 + 뚜레쥬르 100', total: 400, chosen: true, reason: '위험도 낮은 순 · 도너 2곳으로 영향 범위 최소' },
-        { label: 'CJ ONSTYLE 300 + 뚜레쥬르 50 + VIPS 50', total: 400, chosen: false, reason: '도너 3곳 — 영향 테넌트만 늘고 위험도 이득 없음' },
+      reasonTrio: {
+        need: 2_000,
+        pool: 870,
+        slopePerMin: 72,
+        timesNormal: 3.1,
+        cv: 0.61,
+        historyNote: '작년 추석 직후 · 같은 노드풀 공유 테넌트 동반 지연 · 장애 1건',
+      },
+    },
+  },
+  {
+    id: 'q-decide', t: 34_000, agent: 'quota', phase: 'diagnose',
+    state: 'select_escalation', executor: 'llm',
+    model: MODEL_ID, tokens: { in: 4260, out: 540 },
+    title: '에스컬레이션 방식 선택 — 이 파이프라인에서 유일한 LLM 개입',
+    payload: {
+      options: [
+        { name: '기존 노드풀에서 HPA 상한만 상향', verdict: '기각', note: '같은 노드풀 공유 — 작년 장애가 정확히 이 경로였다' },
+        { name: 'CJ 대한통운 전용 노드풀 격리 (Karpenter)', verdict: '채택', note: '옆 테넌트 영향 0 · 불규칙 스파이크를 노드 경계로 흡수 · 연휴 종료 후 회수' },
+        { name: '클러스터 전체 노드 증설', verdict: '기각', note: '한 테넌트 때문에 전 테넌트 비용을 올린다 · 격리 효과도 없음' },
       ],
-      donorKeys: ['cgv', 'cjenm'],
-      note: '후보 표 안에서 배분만 시킨다. 모델이 새 숫자를 만들지 못한다.',
-      fallback: '모델 호출 실패 시 위험도 오름차순 그리디로 폴백 · 폴백 사실은 기록에 남긴다',
     },
   },
   {
@@ -174,50 +337,76 @@ const STEPS: AgentStep[] = [
     detail: '검증에까지 AI 를 넣으면 불확실한 단계를 하나 더 쌓는 꼴이다. 여기는 규칙만 건다.',
     payload: {
       checks: [
-        { n: '①', label: '합계 = 필요량 400 rps', ok: true },
-        { n: '②', label: '도너 잔여 ≥ SLA 하한', ok: true, note: 'ONSTYLE 900≥600 · 뚜레쥬르 800≥500' },
-        { n: '③', label: '줄 수 있는 양 초과 없음', ok: true },
-        { n: '④', label: '총 파이 불변 (zero-sum)', ok: true, note: '6,300 rps' },
-        { n: '⑤', label: '후보 밖 · 자기자신 · 중복 도너 아님', ok: true },
+        { n: '①', label: '신규 쿼터 ≥ 예상 RPS', ok: true, note: '5,600 ≥ 5,600' },
+        { n: '②', label: '도너 쿼터 불변 — 남의 것을 뺏지 않음', ok: true, note: 'ONSTYLE 1,200 · 뚜레쥬르 900 · VIPS 600' },
+        { n: '③', label: '노드풀 상한 · 계정 vCPU 쿼터 내', ok: true, note: '+12 노드 · 한도 40' },
+        { n: '④', label: '회수 조건 명시', ok: true, note: '사용률 40% 미만 30분 지속 시 원복' },
+        { n: '⑤', label: '동일 테넌트 진행 중 조치 없음', ok: true },
       ],
       footer: '하나라도 어기면 집행하지 않는다.',
     },
   },
   {
-    id: 'q-hitl', t: 44_000, agent: 'quota', phase: 'act',
-    state: 'check_approval', executor: 'code',
-    title: '사람 승인이 필요한가 — 기본은 자동',
-    detail: '테넌트 56개에 몇 초 간격 알림을 사람이 매번 클릭할 수는 없다. 잘못 집행되면 그쪽에서 다시 트리거가 발화해 스스로 교정된다.',
+    id: 'q-apply', t: 44_000, agent: 'quota', phase: 'act',
+    state: 'isolate_nodepool.py', executor: 'exec',
+    title: '집행 — 전용 노드풀 격리',
     payload: {
       lines: [
-        '수혜 테넌트 변동률   400 / 3,600 = 11.1%   ≤ 25%   통과',
-        '도너 수              2곳                   < 4곳   통과',
-        '→ 자동 집행 (Slack 승인 불필요)',
+        'Karpenter NodePool  cjlogistics-dedicated  생성 · taint/toleration 적용',
+        'cjlogistics 워크로드 이동 → 공유 노드풀에서 분리',
+        'cjlogistics  3,600 → 5,600 rps   (도너 쿼터 불변 · 파이 자체가 커진다)',
       ],
+      nodepoolSplit: {
+        tenant: 'oliveyoung',
+        shared: ['cgv', 'cjenm', 'vips'],
+      },
     },
   },
   {
-    id: 'q-apply', t: 48_000, agent: 'quota', phase: 'act',
-    state: 'manage_limits.py', executor: 'exec',
-    title: '집행 — AI 미개입',
-    payload: {
-      lines: [
-        'cjlogistics  3,600 → 4,000    onstyle  1,200 → 900    tlj  900 → 800',
-        '한도 config 갱신 → ConfigMap → hot-reload',
-        '한도는 config · 사용량은 Redis 카운터 · 총 파이 6,300 rps 불변',
-      ],
-    },
-  },
-  {
-    id: 'q-cool', t: 62_000, agent: 'quota', phase: 'cooldown',
+    id: 'q-cool', t: 48_500, agent: 'quota', phase: 'cooldown',
     state: 'quota-locks · TTL', executor: 'code',
-    title: '쿨다운 — 같은 테넌트 재발화 억제',
-    detail: '집행 직후엔 사용량 지표가 아직 새 한도를 반영하지 못한다. 쿨다운이 없으면 같은 트리거가 연달아 발화한다.',
+    title: '쿨다운 — 재발화 억제 · 회수 조건 감시',
     payload: {
       lines: [
         'quota-locks TTL 유지  ·  cjlogistics 재발화 차단 5분',
-        '반영 확인             사용률 80.0% → 84.5%  (한도 4,000 기준)',
-        '※ 통과량이 늘며 적립 지연이 오르는 중 — 쿼터 축에서는 정상. 인프라 축은 Agent 2 소관',
+        '회수 조건            사용률 40% 미만 30분 지속 → 노드풀 반납',
+        '다음 트리거까지 사용률 추이만 지켜본다',
+      ],
+    },
+  },
+  {
+    id: 'q-cool-1', t: 50_000, agent: 'quota', phase: 'cooldown',
+    state: 'usage-monitor.py', executor: 'code',
+    title: '모니터링 — 사용률 재확인',
+    payload: {
+      counter: 1, total: 3,
+      lines: [
+        'CJ 대한통운 사용률   82% → 76%   (경과 6분)',
+        'quota-locks TTL 남음 4분',
+      ],
+    },
+  },
+  {
+    id: 'q-cool-2', t: 54_000, agent: 'quota', phase: 'cooldown',
+    state: 'usage-monitor.py', executor: 'code',
+    title: '모니터링 — 사용률 재확인',
+    payload: {
+      counter: 2, total: 3,
+      lines: [
+        'CJ 대한통운 사용률   76% → 69%   (경과 10분)',
+        '대기 커넥션          210 → 154건',
+      ],
+    },
+  },
+  {
+    id: 'q-cool-3', t: 58_000, agent: 'quota', phase: 'cooldown',
+    state: 'usage-monitor.py', executor: 'code',
+    title: '모니터링 — 사용률 재확인',
+    payload: {
+      counter: 3, total: 3,
+      lines: [
+        'CJ 대한통운 사용률   69% → 61%   (경과 14분)',
+        '회수 조건 미충족 — 40% 미만 30분 지속 필요',
       ],
     },
   },
@@ -228,227 +417,264 @@ const STEPS: AgentStep[] = [
     detail: '무엇을·왜·언제. 사후 배치 분석과 정확도 평가의 원천이 된다.',
     payload: {
       lines: [
-        'DynamoDB quota-decisions  ·  quota-state 갱신  ·  quota-locks 해제',
+        'DynamoDB quota-decisions  ·  decision = nodepool_isolation  ·  quota-locks 해제',
         'llm_fallback = false  (모델 정상 응답)',
       ],
     },
   },
 
-  /* ── Agent 2 · 이상 탐지 및 대응 ─────────────────────── */
+];
+
+const INCIDENT_STEPS: AgentStep[] = [
+  /* ── Agent 2 · 이상 탐지 및 대응 ─────────────────────────────
+     대한통운(oliveyoung)은 Agent 1 에서 전용 노드풀로 격리됐지만, 데이터 계층(Aurora · RDS Proxy)은
+     여전히 공유다. 그 위에서 CJ 온스타일(cgv)이 라이브 커머스 방송을 시작하며 적립 쓰기가 몰린다. */
   {
-    id: 'i-sqs', t: 52_000, agent: 'incident', phase: 'detect',
+    id: 'i-sqs', t: 8_000, agent: 'incident', phase: 'detect',
     state: 'SQS incident-alerts', executor: 'code',
-    title: '알람 수신 — 3소스',
+    title: '알람 수신 — 3소스 합의',
     payload: {
       lines: [
-        'AMP Alertmanager   cjlogistics · PointEarnLatency · P99 2.1s',
-        'CloudWatch Alarm   RDS 커넥션 사용률 임계 초과',
+        'AMP Alertmanager   cjonstyle · PointEarnLatency · 동적 베이스라인 이탈 (182ms → 2,400ms)',
+        'CloudWatch Alarm   공용 RDS Proxy 커넥션 사용률 임계 초과 (97%)',
         '정적 알람          해당 없음 (OOMKill · CrashLoop)',
       ],
     },
   },
   {
-    id: 'i-norm', t: 55_000, agent: 'incident', phase: 'preprocess',
-    state: '전처리 Lambda · 1 정규화', executor: 'code',
-    title: '소스별 페이로드를 단일 스키마로',
-    detail: 'LLM 이 없는 이유 — 형식 통일 · 중복 제거 · 조회는 정답이 하나다. 코드가 소유한다.',
-    payload: { lines: ['{ source, tenant, service, symptom, metric, value, threshold, fired_at }'] },
-  },
-  {
-    id: 'i-dedupe', t: 57_000, agent: 'incident', phase: 'preprocess',
-    state: '전처리 Lambda · 2 중복 체크', executor: 'code',
-    title: '같은 서비스 · 테넌트가 진행 중인가',
-    payload: { lines: ['진행 중 인시던트 없음 → 신규 생성', '있었다면 기존 인시던트에 병합하고 종료'] },
-  },
-  {
-    id: 'i-collect', t: 60_000, agent: 'incident', phase: 'collect',
-    state: '전처리 Lambda · 3 데이터 수집', executor: 'code',
-    title: '배포 이력 · 에러 로그',
+    id: 'i-collect', t: 16_000, agent: 'incident', phase: 'collect',
+    state: '전처리 Lambda · 데이터 수집', executor: 'code',
+    title: '수집 소스 스캔',
     payload: {
       lines: [
-        'ArgoCD   최근 배포 없음 (마지막 4h 전 · rev a91c2f)',
-        'Loki     최근 5분 ERROR 1,284건',
-        'Loki     대표 메시지 "connection pool exhausted" 외 4개',
+        'ArgoCD    최근 배포 없음 (마지막 6h 전)',
+        'DynamoDB  cjone-business-events   CJ 온스타일 라이브 커머스 방송 시작 10:02 KST',
+        'Loki      최근 5분 ERROR 612건 · 대표 메시지 "connection pool exhausted" 외 3개',
       ],
     },
   },
   {
-    id: 'i-prompt', t: 63_000, agent: 'incident', phase: 'collect',
-    state: '전처리 Lambda · 4 프롬프트 제작', executor: 'code',
+    id: 'i-prompt', t: 19_000, agent: 'incident', phase: 'collect',
+    state: '전처리 Lambda · 프롬프트 제작', executor: 'code',
     title: '정형 템플릿',
     detail: '왜 Step Functions 가 아니라 Lambda 하나인가 — 정규화→중복체크→수집→프롬프트는 분기 없는 직렬 작업이다. SFN 은 단계 사이에만 있다.',
     payload: { lines: ['[정규화된 트리거] + [수집 데이터] + [출력 스키마 지시]'] },
   },
   {
-    id: 'i-diag', t: 68_000, agent: 'incident', phase: 'diagnose',
-    state: '진단 에이전트 (Bedrock)', executor: 'llm',
-    model: MODEL_ID, tokens: { in: 18600, out: 2240 },
-    title: '도구를 스스로 골라 호출 → 결과 관찰 → 재호출',
-    detail: '정해진 원인 목록 없이 자유 도출한다. 고정하는 것은 출력 JSON 스키마뿐.',
+    id: 'i-tool-metric', t: 24_000, agent: 'incident', phase: 'diagnose',
+    state: '진단 에이전트 (Bedrock) · 도구 1/3', executor: 'llm',
+    model: MODEL_ID, tokens: { in: 4_100, out: 320 },
+    title: '생각 중 · 사용한 도구 — 메트릭',
+    detail: '정해진 원인 목록 없이 자유 도출한다. 먼저 무엇이 늘었는지부터 본다.',
     payload: {
-      tools: [
-        { name: 'query_metrics', src: 'AMP · K8s 메트릭 150일', calls: 2 },
-        { name: 'query_cloudwatch', src: 'RDS · ALB · NAT', calls: 2 },
-        { name: 'query_logs', src: 'Loki', calls: 1 },
-        { name: 'get_flows', src: 'Hubble · 테넌트 간 흐름', calls: 1 },
-        { name: 'get_history', src: 'DynamoDB · 과거 조치 이력', calls: 1 },
+      lines: [
+        'AMP         cjonstyle(온스타일) 적립 RPS 360 → 940  (+161%)',
+        'CloudWatch  공용 RDS Proxy 커넥션 풀 사용률 60% → 97%',
+        'HPA         레플리카 6 → 10 (설정 상한까지 이미 자동 확장 — 더 늘리려면 상한 자체를 올려야 한다)',
       ],
-      idle: ['query_traces', 'get_deploys', 'get_pods'],
-      total: 7,
     },
   },
   {
-    id: 'i-json', t: 76_000, agent: 'incident', phase: 'diagnose',
+    id: 'i-tool-log', t: 28_000, agent: 'incident', phase: 'diagnose',
+    state: '진단 에이전트 (Bedrock) · 도구 2/3', executor: 'llm',
+    model: MODEL_ID, tokens: { in: 5_400, out: 410 },
+    title: '생각 중 · 사용한 도구 — 로그',
+    detail: '커넥션이 왜 안 풀리는지, 뭐가 오래 붙잡고 있는지 확인한다.',
+    payload: {
+      lines: [
+        'Loki   슬로우 쿼리 로그 340건 · 평균 실행 22초',
+        'Loki   대표 쿼리 "point_ledger 적립 집계 GROUP BY member_id"',
+        'Loki   "connection pool exhausted" 128건',
+      ],
+    },
+  },
+  {
+    id: 'i-tool-pool', t: 32_000, agent: 'incident', phase: 'diagnose',
+    state: '진단 에이전트 (Bedrock) · 도구 3/3', executor: 'llm',
+    model: MODEL_ID, tokens: { in: 3_700, out: 260 },
+    title: '생각 중 · 사용한 도구 — 커넥션 풀 상태',
+    detail: '풀 자체의 여유가 얼마나 남았는지 마지막으로 본다.',
+    payload: {
+      lines: [
+        'RDS Proxy   max_connections 400 · 사용 388 · 대기 340',
+        '대기 시간   평균 4.8초 · 최대 12.1초',
+        '연결 대상   cgv · cjenm · oliveyoung · vips — 전부 같은 풀',
+      ],
+    },
+  },
+  {
+    id: 'i-json', t: 35_000, agent: 'incident', phase: 'diagnose',
     state: '출력 JSON (스키마 고정)', executor: 'llm',
-    title: '연휴 적체분이 일괄 배송완료되며 적립 트랜잭션이 몰려 공용 RDS 커넥션 풀 81% 를 점유하고 있다',
+    title: 'CJ 온스타일 라이브 커머스로 적립 쓰기가 몰리며 공용 RDS Proxy 풀이 소진 — 원인은 하나가 아니다',
     payload: {
-      tenant: 'cjlogistics',
-      occurred_at: '10:07:12',
-      symptom: '포인트 적립 P99 2.1s · 커넥션 풀 소진',
-      direct_cause: '공용 RDS 커넥션 풀 81% 를 cjlogistics 적립 트랜잭션이 점유',
-      root_cause: '연휴 적체분 일괄 배송완료 → 적립 쓰기 급증 → HPA 6→10 → 파드당 커넥션 × 레플리카가 풀 상한 근접',
+      tenant: 'cgv',
+      occurred_at: '10:09:04',
+      symptom: '포인트 적립 P99 2.4s · SLO(1.0s) 대비 240%',
+      direct_cause: '공용 RDS Proxy 커넥션 풀 97% 점유 · 대기 커넥션 340건',
+      root_cause: '적립 집계 쿼리가 평균 22초간 커넥션을 붙잡은 상태에서, 온스타일 방송으로 쓰기 요청이 급증해 대기 큐가 길어지고 처리량 자체가 부족해진 복합 원인',
+      tool_calls: '3회 · 3종',
       evidence: [
-        'query_metrics    적립 RPS 2,880 → 3,400 · 쿼터 재분배(+48s) 직후 통과량 증가가 겹침',
-        'query_cloudwatch DatabaseConnections 96% · 대기 커넥션 41',
-        'query_logs       "connection pool exhausted" 1,284건',
-        'get_flows        타 테넌트 → RDS 흐름 변화 없음 — 테넌트 격리는 유지',
-        'get_history      동일 증상 3건 · RB-05+RB-04 로 해소 2건',
+        '메트릭       적립 RPS 360 → 940 (온스타일) · 풀 사용률 60% → 97%',
+        '로그         적립 집계 쿼리 평균 실행 22초 · 슬로우 쿼리 340건',
+        '커넥션 풀    max_connections 400 · 사용 388 · 대기 340',
       ],
     },
   },
   {
-    id: 'i-verify', t: 82_000, agent: 'incident', phase: 'diagnose',
+    id: 'i-verify', t: 38_000, agent: 'incident', phase: 'diagnose',
     state: '검증 Lambda (결정론)', executor: 'code',
     title: '신뢰도는 모델에게 묻지 않는다',
     detail: '평가받을 대상에게 몇 점 같냐고 묻지 않는다. 신뢰도는 도구 호출 기록이라는 사실로 계산한다.',
     payload: {
       checks: [
         { n: '①', label: 'JSON 스키마 검사', ok: true },
-        { n: '②', label: '정당한 추론인가 — 도구 호출 횟수 · 종류로 신뢰도 산출', ok: true, note: '7회 · 5종 → 0.82' },
+        { n: '②', label: '정당한 추론인가 — 도구 호출 횟수 · 종류로 신뢰도 산출', ok: true, note: '3회 · 3종 → 0.78' },
       ],
       footer: 'LLM 자가 confidence 는 쓰지 않는다. 신뢰 불가면 재진단 1회(도구 추가 조회 지시), 2회 실패면 사람에게 보고하고 중단한다.',
     },
   },
   {
-    id: 'i-plan', t: 90_000, agent: 'incident', phase: 'act',
+    id: 'i-plan', t: 46_000, agent: 'incident', phase: 'act',
     state: '조치 에이전트 (Bedrock)', executor: 'llm',
-    model: MODEL_ID, tokens: { in: 6900, out: 780 },
+    model: MODEL_ID, tokens: { in: 7_200, out: 820 },
     title: '이 원인을 없애려면 무엇을 해야 하는가',
-    detail: '스로틀(RB-03)은 수요 자체를 깎는다. 방금 쿼터를 상향받은 트래픽이라 배제하고, 처리 쪽 병목을 넓히는 조합을 택했다.',
+    detail: '스로틀(RB-03)은 수요 자체를 깎는다. 원인이 수요가 아니라 처리 쪽 병목이라 배제하고, 풀을 넓히고 여유를 늘리는 조합을 택했다.',
     payload: {
-      expected: 'P99 300ms 이내 · 공용 풀 사용률 60% 이하',
-      milestones: ['2분 내 대기 커넥션 0', '5분 내 P99 회복'],
+      expected: 'P99 1.0s 이내 · 공용 풀 사용률 65% 이하',
+      milestones: ['4분 내 대기 커넥션 50건 이하', '7분 내 P99 SLO 이내 회복'],
       plan: [
-        { id: 'RB-05', name: '슬로우 쿼리 세션 종료', param: '실행 30초 초과 세션' },
         { id: 'RB-04', name: 'RDS Proxy 커넥션 풀 조정', param: 'max_connections 400 → 640' },
+        { id: 'RB-05', name: '슬로우 쿼리 세션 종료', param: '실행 20초 초과 세션' },
+        { id: 'RB-01', name: 'HPA 레플리카 상향', param: '레플리카 6 → 12' },
       ],
       monitorSec: 600,
     },
   },
   {
-    id: 'i-catalog', t: 96_000, agent: 'incident', phase: 'act',
+    id: 'i-catalog', t: 52_000, agent: 'incident', phase: 'act',
     state: '카탈로그 조합으로 답이 나오나', executor: 'code',
-    title: '런북 카탈로그 — 조치 1개 = 런북 1개 = 최소 권한',
-    detail: '런북이 리소스 두 개를 만지면 권한도 둘 다 열린다. 최소 권한을 지키려면 쪼개고, 필요하면 조합한다.',
+    title: '런북 카탈로그 13개 — 조합 상한 5개 · 이번엔 3개만',
+    detail: '런북이 리소스 두 개를 만지면 권한도 둘 다 열린다. 최소 권한을 지키려면 쪼개고, 필요한 만큼만 조합한다 — 상한은 5개지만 이번엔 3개로 충분하다.',
     payload: {
       catalog: [
-        { id: 'RB-01', name: 'HPA 레플리카 상향' }, { id: 'RB-02', name: '파드 롤링 재시작' },
+        { id: 'RB-01', name: 'HPA 레플리카 상향', chosen: true }, { id: 'RB-02', name: '파드 롤링 재시작' },
         { id: 'RB-03', name: '테넌트 RPS 스로틀' }, { id: 'RB-04', name: 'RDS Proxy 커넥션 풀 조정', chosen: true },
         { id: 'RB-05', name: '슬로우 쿼리 세션 종료', chosen: true }, { id: 'RB-06', name: '노드풀 격리' },
         { id: 'RB-07', name: '노드 cordon' }, { id: 'RB-08', name: 'ArgoCD 롤백' },
-        { id: 'RB-09', name: 'limit 상향' }, { id: 'RB-10', name: '통보' },
-        { id: 'RB-11', name: '무조치' }, { id: 'RB-12', name: '핸드오프' },
+        { id: 'RB-09', name: 'limit 상향' }, { id: 'RB-10', name: 'RLS Redis 재시작' },
+        { id: 'RB-11', name: '테넌트 통보' }, { id: 'RB-12', name: '쿼터 핸드오프' },
+        { id: 'RB-13', name: '무조치 · 에스컬레이션' },
       ],
       note: '미매칭이었다면 런북 직접 제작 → 무조건 T3 (HITL + 보고서). 승인·실행되면 카탈로그에 적립해 다음엔 조합 경로로 처리한다.',
     },
   },
   {
-    id: 'i-tier', t: 100_000, agent: 'incident', phase: 'act',
+    id: 'i-tier', t: 56_000, agent: 'incident', phase: 'act',
     state: '티어 판정 (AI)', executor: 'llm',
-    model: MODEL_ID, tokens: { in: 2100, out: 160 },
+    model: MODEL_ID, tokens: { in: 2_200, out: 170 },
     title: 'T2 — HITL',
     detail: '장애 등급 × 런북 조합 위험도 × 출처(기존 / 직접 제작)',
     payload: {
-      lines: [
-        '장애 등급         높음 — 부분 실패 (적립 P99 2.1s · 5xx 발생)',
-        '런북 조합 위험도  높음 — 세션 종료 · 커넥션 풀 변경 포함',
-        '출처              기존 런북 (카탈로그)',
-        '→ T2 · Slack 승인 · 타임아웃 600초',
+      options: [
+        { name: 'T1 — 완전 자동 실행 (승인 없음)', verdict: '기각', note: '런북 조합 위험도가 높아 무인 실행은 배제' },
+        { name: 'T2 — Slack 승인 후 실행 (타임아웃 600초)', verdict: '채택', note: '장애 등급 높음 + 기존 카탈로그 런북 → 승인만 거치면 충분' },
+        { name: 'T3 — 사람이 직접 제작 · 보고서 동반', verdict: '기각', note: '기존 런북 매칭 성공 · 직접 제작 불필요' },
       ],
     },
   },
   {
-    id: 'i-hitl', t: 106_000, agent: 'incident', phase: 'act',
+    id: 'i-hitl', t: 62_000, agent: 'incident', phase: 'act',
     state: 'HITL — Slack 승인', executor: 'code',
-    title: '600초 내 승인',
+    title: 'HITL — Slack 승인 대기',
     detail: '완전 자동화가 목표가 아니다. 승인 버튼을 누를 수 있는 상태까지 자동으로 만드는 게 범위다.',
     payload: {
       lines: [
-        '@yuhyun 승인 · 42초',
+        '@yuhyun 승인 · 55초',
         '타임아웃이었다면 실행하지 않는다 — 이력만 기록하고 사람에게 통보',
       ],
     },
   },
   {
-    id: 'i-exec', t: 112_000, agent: 'incident', phase: 'act',
+    id: 'i-exec', t: 68_000, agent: 'incident', phase: 'act',
     state: '런북 executor Lambda', executor: 'exec',
-    title: 'EKS 집행 — 가드레일은 롤백이 아니라 사전 수립',
+    title: 'EKS · Aurora 집행 — 가드레일은 롤백이 아니라 사전 수립',
     detail: '서비스 최소 가용 구간은 AI 불가침. Kyverno 정책이 executor 보다 먼저 막는다.',
     payload: {
       lines: [
         '권한 분리       IAM · K8s RBAC (런북별 최소 권한)',
         'Kyverno 사전 가드레일   통과',
-        '집행            RB-05 슬로우 쿼리 세션 종료 → RB-04 RDS Proxy 커넥션 풀 상향',
+        '집행            RB-04 풀 상향 → RB-05 슬로우 쿼리 세션 종료 → RB-01 HPA 레플리카 상향',
       ],
     },
   },
   {
-    id: 'i-watch', t: 122_000, agent: 'incident', phase: 'cooldown',
+    id: 'i-watch', t: 78_000, agent: 'incident', phase: 'cooldown',
     state: '모니터링 Lambda · 600초', executor: 'code',
     title: '마일스톤 순서대로 확인',
     payload: {
       checks: [
-        { n: 'M1', label: '2분 내 대기 커넥션 0', ok: true, note: '+118s · 0건' },
-        { n: 'M2', label: '5분 내 P99 회복', ok: true, note: '+130s · 158ms' },
-        { n: '결과', label: '예상 결과 도달 — P99 300ms 이내 · 풀 60% 이하', ok: true },
+        { n: 'M1', label: '4분 내 대기 커넥션 50건 이하', ok: true, note: '+210s · 38건' },
+        { n: 'M2', label: '7분 내 P99 SLO(1.0s) 이내', ok: true, note: '+260s · 620ms' },
+        { n: '결과', label: '예상 결과 도달 — P99 1.0s 이내 · 풀 62% 이하', ok: true },
       ],
+      poolChart: { series: [97, 92, 87, 81, 76, 71, 67, 63, 61, 59, 58], target: 90, goal: 62 },
       footer: '미도달이면 진단으로 되돌려 재진단 1회. 2회째면 사람에게 에스컬레이션한다.',
     },
   },
   {
-    id: 'i-record', t: 134_000, agent: 'incident', phase: 'done',
+    id: 'i-record', t: 90_000, agent: 'incident', phase: 'done',
     state: '종료 · DynamoDB 이력 기록', executor: 'code',
     title: '장애 · 조치 이력 저장 · Slack 보고',
     payload: { lines: ['DynamoDB 장애·조치 이력 기록', 'Slack 보고 — T1 자동 실행 건도 사후 보고 대상'] },
   },
 ];
 
-const CAVEATS = [
+const CAVEATS_Q = [
   '에이전트 이벤트는 전부 목업 — 실제 Step Functions 실행 이력 연결 전',
   'SLO 임계값(300ms)은 SLI/SLO 설계 문서 확정치 반영 전',
-  'Agent 1 의 스케일링 에스컬레이션 분기는 이번 시연 경로에 없음',
+];
+const CAVEATS_I = [
+  '에이전트 이벤트는 전부 목업 — 실제 Step Functions 실행 이력 연결 전',
+  'SLO 임계값(1,000ms)은 SLI/SLO 설계 문서 확정치 반영 전',
 ];
 
-export function buildMockRun(): RunTimeline {
+/** Agent 1 — 추석 연휴 직후 물량 폭주 → 노드풀 격리 */
+export function buildQuotaRun(): RunTimeline {
   return {
-    runId: 'sfn-2608-0417',
-    durationMs: DURATION,
+    runId: 'sfn-q-2609-0417',
+    durationMs: DURATION_Q,
     sloMs: SLO_MS,
     tenantTotal: 56,
     projection: PROJECTION,
-    steps: [...STEPS].sort((a, b) => a.t - b.t),
-    samples: buildSamples(),
-    caveats: CAVEATS,
+    steps: [...QUOTA_STEPS].sort((a, b) => a.t - b.t),
+    samples: buildSamples(DURATION_Q, quotaRunQps, quotaRunP99, (t) => (t < REBALANCE_AT ? QUOTA : QUOTA_AFTER)),
+    caveats: CAVEATS_Q,
   };
 }
 
-export async function loadRun(): Promise<RunTimeline> {
+/** Agent 2 — 별개 상황. Agent 1 과 시계도 데이터도 공유하지 않는다. */
+export function buildIncidentRun(): RunTimeline {
+  return {
+    runId: 'sfn-i-2609-0912',
+    durationMs: DURATION_I,
+    sloMs: SLO_MS_INCIDENT,
+    tenantTotal: 56,
+    projection: INCIDENT_PROJECTION,
+    steps: [...INCIDENT_STEPS].sort((a, b) => a.t - b.t),
+    samples: buildIncidentSamples(DURATION_I),
+    caveats: CAVEATS_I,
+  };
+}
+
+export async function loadRuns(): Promise<{ quota: RunTimeline; incident: RunTimeline }> {
   const source = import.meta.env.VITE_AGENT_SOURCE ?? 'mock';
   const url = import.meta.env.VITE_AGENT_EVENTS_URL as string | undefined;
   if (source === 'live' && url) {
-    const res = await fetch(url);
-    if (res.ok) return (await res.json()) as RunTimeline;
+    try {
+      const res = await fetch(url);
+      if (res.ok) return (await res.json()) as { quota: RunTimeline; incident: RunTimeline };
+    } catch { /* 아래 목업으로 떨어진다 */ }
     console.warn('[cjone] live 에이전트 이벤트를 못 읽어서 mock 으로 떨어짐');
   }
-  return buildMockRun();
+  return { quota: buildQuotaRun(), incident: buildIncidentRun() };
 }

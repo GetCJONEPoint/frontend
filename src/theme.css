@@ -188,19 +188,26 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .pulse { animation: pulse 1.4s ease-in-out infinite; }
 
+/* 동적 베이스라인 이탈 — 카드 전체가 붉게 깜빡인다 (탐지 단계 전용) */
+@keyframes card-alert-blink {
+  0%, 100% { background: var(--surface); border-color: var(--line); }
+  50%      { background: rgba(208, 59, 59, 0.24); border-color: #d03b3b; }
+}
+.card-alert { animation: card-alert-blink 0.8s ease-in-out infinite; }
+
 /* ── 파이프라인 단계 ────────────────────────────────
    --stage-c 는 단계 그룹 색. 진행 중인 칸만 깜빡이고,
    끝난 칸은 오른쪽에 체크 동그라미가 팝업된다. */
 .stage {
   position: relative;
-  flex: 0 1 168px;
-  min-width: 92px;
+  flex: 0 1 200px;
+  min-width: 118px;
   white-space: nowrap;
   overflow: hidden;
   text-align: center;
-  padding: 7px 24px 7px 10px;
-  border-radius: 8px;
-  font-size: 12px;
+  padding: 11px 34px 11px 16px;
+  border-radius: 10px;
+  font-size: 16px;
   font-weight: 500;
   color: var(--ink-3);
   border: 1px solid var(--line);
@@ -210,8 +217,9 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .stage[data-state='done'] {
   color: var(--ink);
   font-weight: 700;
-  border-color: var(--line);   /* 지나온 단계는 기본 회색 테두리 */
-  background: var(--surface);
+  /* 끝난 칸은 단계 색과 무관하게 '종료' 와 같은 초록으로 남는다 */
+  border-color: #16a34a;
+  background: rgba(22, 163, 74, 0.45);
 }
 .stage[data-state='active'] {
   color: var(--ink);
@@ -233,10 +241,10 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 
 .stage-check {
   position: absolute;
-  right: 7px;
+  right: 10px;
   top: 50%;
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   background: #5fc93a;   /* 완료 = 연두 */
   display: flex;
@@ -264,3 +272,46 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
   from { opacity: 0; transform: translateY(14px) scale(.96); }
   to   { opacity: 1; transform: none; }
 }
+
+/* 새 로그 한 줄이 아래에서 떠오르며 들어온다 */
+@keyframes log-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.log-enter { animation: log-in .42s cubic-bezier(.22,.85,.32,1) both; }
+
+/* 방금 올라온 로그는 잠깐 옅게 빛나다 가라앉는다 */
+@keyframes log-flash {
+  0%   { background: rgba(144,133,233,.18); box-shadow: inset 3px 0 0 #9085e9; }
+  100% { background: rgba(144,133,233,0); box-shadow: inset 3px 0 0 rgba(144,133,233,0); }
+}
+.log-flash { animation: log-flash 1.3s ease-out both; border-radius: 8px; }
+
+/* 노드풀이 방금 분리되어 나온 순간 — 전용 풀 박스가 튀어나오듯 등장한다 */
+@keyframes pool-pop {
+  0%   { opacity: 0; transform: translateY(-16px) scale(.94); }
+  65%  { opacity: 1; transform: translateY(3px) scale(1.02); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.pool-isolated { animation: pool-pop .55s cubic-bezier(.22,.85,.32,1) .3s both; }
+
+@keyframes pool-arrow-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* 공용 풀 안에서 곧 떨어져 나갈 테넌트가 잠깐 깜빡이며 눈에 띈다 */
+@keyframes pool-leaving-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .4; }
+}
+.pool-leaving { animation: pool-leaving-pulse .7s ease-in-out infinite; }
+.pool-arrow { animation: pool-arrow-in .3s ease-out .55s both; }
+
+/* 기다리는 동안 점이 하나씩 늘어난다 */
+.dots {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: bottom;
+  width: 0;
+  animation: dots-grow 1.8s steps(5, end) infinite;
+}
+@keyframes dots-grow { to { width: 5ch; } }
